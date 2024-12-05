@@ -219,63 +219,14 @@ class Decompose:
     def annotate_with_motif(self):
         if self.annotation is None:
             motifs = self.motifs_list
-            print(motifs)  ######################################
+            ### print(motifs)
 
             max_distances = [ int( len(motif) * self.dist_ratio ) for motif in motifs]
             motif_match_df = find_similar_match(self.sequecne, motifs, max_distances)
     
             self.annotation = motif_match_df
         
-        return self.annotation
-        '''for motif in motifs:
-            matches = sa.match(motif)
-            l = len(motif)
-            s = matches[0]
-            anno_tmp = pd.DataFrame(columns=['start', 'end', 'motif','CIGAR-like'])
-            for idx in range(1,len(matches)):
-                if matches[idx] != matches[idx - 1] + l:
-                    e = matches[idx - 1] + l
-                    rep = int((e-s)/l)
-                    anno_tmp.loc[anno_tmp.shape[0]] = [s, e, motif, f'{rep}P']
-                    s = matches[idx]
-            annotation_df = pd.concat([annotation_df, anno_tmp], ignore_index=True)'''
-
-        
-
-        # link adjacent region with the same motif
-        '''
-        linked_df = pd.DataFrame(columns=['start', 'end', 'motif','CIGAR-like'])
-        s = annotation_df.loc[0,'start']
-        string = ''
-        for i in range(annotation_df.shape[0]):
-            if annotation_df.loc[i,'motif'] != annotation_df.loc[i+1,'motif']:
-                e = annotation_df.loc[i,'end']
-                linked_df.loc[linked_df.shape[0]] = [s, e, motif, f'{rep}P']
-                s = annotation_df.loc[i+1, 'start']
-            else:
-                string += annotation_df.loc[i, 'CIGAR-like']
-                string += xxxx()   ################## solve with inter region zone
-        
-        '''
-
-
-
-        # polish border
-
-
-
-
-        # solve with intersect
-
-
-
-
-        # xxxxxxxxxxxxx
-
-
-
-
-        
+        return self.annotation       
 
 
 if __name__ == "__main__":

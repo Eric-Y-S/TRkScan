@@ -44,7 +44,6 @@ def single_motif_annotation(task):
 def rolling_same(seq1, seq2):
     if len(seq1) != len(seq2):
         return False
-    ### print(seq1)  #######################################################################
     seq1double = seq1 * 2
     for i in range(len(seq1)):
         seq1_new = seq1double[i : i + len(seq1)]
@@ -104,7 +103,7 @@ if __name__ == "__main__":
         print(f'Start Processing [{seq_name}]')
 
         ##################################
-        # deal with N character                 need to complete!!!   ###############################################################
+        # deal with N character          
         ##################################
         seq = str(record.seq)
         seqLen = len(seq)
@@ -129,22 +128,23 @@ if __name__ == "__main__":
         N_coordinate = N_coordinate.sort_values(by=['start'])
         N_coordinate = N_coordinate.reset_index(drop=True)
 
-        N_coordinate_new = pd.DataFrame(columns=['start', 'end'])
-        start = N_coordinate.loc[0, 'start']
-        for i in range(N_coordinate.shape[0]-1):
-            if N_coordinate.loc[i, 'end'] != N_coordinate.loc[i+1, 'start']:
-                N_coordinate_new.loc[N_coordinate_new.shape[0], ] = [start, N_coordinate.loc[i, 'end']]
-                start = N_coordinate.loc[i+1, 'start']
+        if N_coordinate.shape[0]:
+            N_coordinate_new = pd.DataFrame(columns=['start', 'end'])
+            start = N_coordinate.loc[0, 'start']
+            for i in range(N_coordinate.shape[0]-1):
+                if N_coordinate.loc[i, 'end'] != N_coordinate.loc[i+1, 'start']:
+                    N_coordinate_new.loc[N_coordinate_new.shape[0], ] = [start, N_coordinate.loc[i, 'end']]
+                    start = N_coordinate.loc[i+1, 'start']
 
-        N_coordinate_new.loc[N_coordinate_new.shape[0], ] = [start, N_coordinate.loc[N_coordinate.shape[0] - 1, 'end']]
-        N_coordinate_new['old_index'] = N_coordinate_new['end']
-        N_coordinate_new['new_index'] = N_coordinate_new['end']
-        l = 0
-        for i in range(N_coordinate_new.shape[0]):
-            l += N_coordinate_new.loc[i,'end'] - N_coordinate_new.loc[i,'start']
-            N_coordinate_new.loc[i,'new_index'] -= l
+            N_coordinate_new.loc[N_coordinate_new.shape[0], ] = [start, N_coordinate.loc[N_coordinate.shape[0] - 1, 'end']]
+            N_coordinate_new['old_index'] = N_coordinate_new['end']
+            N_coordinate_new['new_index'] = N_coordinate_new['end']
+            l = 0
+            for i in range(N_coordinate_new.shape[0]):
+                l += N_coordinate_new.loc[i,'end'] - N_coordinate_new.loc[i,'start']
+                N_coordinate_new.loc[i,'new_index'] -= l
 
-        print(N_coordinate_new)  #############################
+            print(N_coordinate_new)  #############################
 
         ##################################
         # split into windows to decompose
@@ -187,7 +187,7 @@ if __name__ == "__main__":
         for pid, _, result in results:
             result.motifs_list = nondup
 
-        ### print(nondup)   ##########################
+        print(nondup)
 
 
         ##################################
@@ -228,9 +228,10 @@ if __name__ == "__main__":
         pre = [(None, None, None) for i in range(length + 1)]   # (pre_i, motif_id, motif)
         idx = 0
         for i in range(1, length + 1):
-            # default: skip one base
-            dp[i] = dp[i-1] - 1
-            pre[i] = (i-1, None, None)
+            # skip one base
+            if dp[i-1] - 1 > 0:
+                dp[i] = dp[i-1] - 1
+                pre[i] = (i-1, None, None)
             
             while idx < merged_df.shape[0] and merged_df.loc[idx, 'end'] <= i:
                 if merged_df.loc[idx, 'end'] < i:
@@ -248,6 +249,7 @@ if __name__ == "__main__":
                 
                 idx += 1
         
+        ### print(pre)
 
         # retrace
         idx = length
@@ -263,100 +265,111 @@ if __name__ == "__main__":
             else:
                 idx -= 1
   
+        ### print(next)
 
         # output motif annotation file
         annotation = pd.DataFrame(columns=['seq','start','end','motif','rep_num','score','CIGAR'])
         idx = 0
-        motif = next[idx][1]
-        start, end, cur_motif, rep_num, score, cigar_string  = 0, 0, None, 0 , 0, ''
-        skip_num = 0
+        
+        while idx < length:
+            if pre[idx][0] == None and next[idx][0] != None:    # is a start site
+                idx2 = idx
+                start, end, cur_motif, rep_num, score, max_score, cigar_string  = idx, 0, None, 0, 0, 0, ''
+                skip_num = 0
+                while next[idx2][0] != None:
+                    if next[idx2][1]:    # match a motif 
+                        ### print(next[idx2][1])   ###########################
+                        if cur_motif != next[idx2][1]:       # split the annotation and init
+                            ### print(f'{cur_motif} -> {next[idx2][1]}')
+                            if cur_motif != None:
+                                annotation.loc[annotation.shape[0], ] = row
+                                start, end, cur_motif, rep_num, score, max_score, cigar_string  = idx2, idx2, next[idx2][1], 0, 0, 0, ''
+                                skip_num = 0
+                            else:
+                                cur_motif = next[idx2][1]
 
-        while next[idx][0] != None:
-            if next[idx][1]:    # match a motif 
-                if skip_num:
-                    cigar_string += f'{skip_num}N'
-                    score -= skip_num * gap_penalty
-                    skip_num = 0
-                if cur_motif != next[idx][1]:       # split the annotation and init
-                    if cur_motif != None:
-                        annotation.loc[annotation.shape[0], ] = [seq_name, start, end, cur_motif, rep_num, score, cigar_string]
-                        start, end, cur_motif, rep_num, score, cigar_string  = idx, idx, next[idx][1], 0 , 0, ''
-                    else:
-                        cur_motif = next[idx][1]
+                        if skip_num:
+                            cigar_string += f'{skip_num}N'
+                            score -= skip_num * gap_penalty
+                            skip_num = 0
 
-                rep_num += 1
-                score += len(cur_motif) - get_distacne(next[idx][1], filter_seq[idx : next[idx][0]])   ################## change
-                cigar_string += get_cigar(next[idx][1], filter_seq[idx : next[idx][0]]) + '/'
-            else:               # skip a base
-                if idx != 0:
-                    skip_num += 1
-            
-            idx = next[idx][0]
-            end = idx
+                        ### print(rep_num)
+                        rep_num += 1
+                        score += len(cur_motif) - get_distacne(next[idx2][1], filter_seq[idx2 : next[idx2][0]]) * distance_penalty
+                        cigar_string += get_cigar(next[idx2][1], filter_seq[idx2 : next[idx2][0]]) + '/'
+                        if score >= max_score:
+                            row = [seq_name, start, next[idx2][0], cur_motif, rep_num, score, cigar_string]
+                            max_score = score
+                    else:               # skip a base
+                        if idx2 != 0:
+                            ### print(idx2)
+                            skip_num += 1
+                
+                    idx2 = next[idx2][0]
+                    end = idx2
+                annotation.loc[annotation.shape[0], ] = row
 
-        if skip_num:
-            cigar_string += f'{skip_num}N'
-        annotation.loc[annotation.shape[0], ] = [seq_name, start, end, cur_motif, rep_num, score, cigar_string]
-            
-        print(annotation)
+            idx += 1
+
+        annotation = annotation.reset_index(drop=True)
+        ### print(annotation)
         
         # coordinates transformation with N character
-        for i in range(annotation.shape[0]):
-            # edit cigar string
-            old_cigar = annotation.loc[i, 'CIGAR']
-            new_cigar, cot = '', ''
-            idx = 0
-            cur = annotation.loc[i, 'start']
-            while idx < len(old_cigar):
-                symbol = old_cigar[idx]
-                if symbol == '/':
-                    new_cigar += '/'
-                elif symbol in ['=','X','I','N']:
-                    length = int(cot)
-                    tmp = N_coordinate_new[(N_coordinate_new['new_index'] > cur) & (N_coordinate_new['new_index'] <= cur + length)]
-                    if tmp.shape[0]:    # if there is N character in this region
-                        ### print(f'###{cur} ~ {cur+length}')
-                        ### print(tmp)
-                        
-                        for row in tmp.itertuples():
-                            length -= row.new_index - cur
-                            new_cigar += f'{row.new_index - cur}{symbol}'
-                            new_cigar += f'{row.end - row.start}N'
-                            cur += row.new_index - cur
-                            ### new_cigar += f'{N_coordinate_new['new_index'] - cur}{symbol}'
-                        new_cigar += f'{length}{symbol}' if length != 0 else ''
-                        cur += length
+        if N_coordinate.shape[0]:
+            for i in range(annotation.shape[0]):
+                # edit cigar string
+                old_cigar = annotation.loc[i, 'CIGAR']
+                new_cigar, cot = '', ''
+                idx = 0
+                cur = annotation.loc[i, 'start']
+                while idx < len(old_cigar):
+                    symbol = old_cigar[idx]
+                    if symbol == '/':
+                        new_cigar += '/'
+                    elif symbol in ['=','X','I','N']:
+                        length = int(cot)
+                        tmp = N_coordinate_new[(N_coordinate_new['new_index'] > cur) & (N_coordinate_new['new_index'] <= cur + length)]
+                        if tmp.shape[0]:    # if there is N character in this region
+                            ### print(f'###{cur} ~ {cur+length}')
+                            ### print(tmp)
+                            
+                            for row in tmp.itertuples():
+                                length -= row.new_index - cur
+                                new_cigar += f'{row.new_index - cur}{symbol}'
+                                new_cigar += f'{row.end - row.start}N'
+                                cur += row.new_index - cur
+                                ### new_cigar += f'{N_coordinate_new['new_index'] - cur}{symbol}'
+                            new_cigar += f'{length}{symbol}' if length != 0 else ''
+                            cur += length
+                        else:
+                            new_cigar += f'{length}{symbol}'
+                            cur += length
+                        cot = ''
+                    elif symbol == 'D':
+                        new_cigar += f'{cot}{symbol}'
+                        cot = ''
                     else:
-                        new_cigar += f'{length}{symbol}'
-                        cur += length
-                    cot = ''
-                elif symbol == 'D':
-                    new_cigar += f'{cot}{symbol}'
-                    cot = ''
-                else:
-                    cot += symbol
+                        cot += symbol
+                    
+                    annotation.loc[i, 'CIGAR'] = new_cigar
+                    idx += 1
                 
-                annotation.loc[i, 'CIGAR'] = new_cigar
-                idx += 1
-            
-            
-            # transform start site
-            tmp = N_coordinate_new[N_coordinate_new['new_index'] <= int(annotation.loc[i,'start'])]
-            if tmp.shape[0]:
-                tmp = tmp.reset_index(drop=True)
-                l = tmp.shape[0] - 1
-                annotation.loc[i,'start'] += tmp.loc[l,'old_index'] - tmp.loc[l,'new_index']
-            # transform end site
-            tmp = N_coordinate_new[N_coordinate_new['new_index'] <= int(annotation.loc[i,'end'])]
-            if tmp.shape[0]:
-                tmp = tmp.reset_index(drop=True)
-                l = tmp.shape[0] - 1
-                annotation.loc[i,'end'] += tmp.loc[l,'old_index'] - tmp.loc[l,'new_index'] 
+                
+                # transform start site
+                tmp = N_coordinate_new[N_coordinate_new['new_index'] <= int(annotation.loc[i,'start'])]
+                if tmp.shape[0]:
+                    tmp = tmp.reset_index(drop=True)
+                    l = tmp.shape[0] - 1
+                    annotation.loc[i,'start'] += tmp.loc[l,'old_index'] - tmp.loc[l,'new_index']
+                # transform end site
+                tmp = N_coordinate_new[N_coordinate_new['new_index'] <= int(annotation.loc[i,'end'])]
+                if tmp.shape[0]:
+                    tmp = tmp.reset_index(drop=True)
+                    l = tmp.shape[0] - 1
+                    annotation.loc[i,'end'] += tmp.loc[l,'old_index'] - tmp.loc[l,'new_index'] 
             
 
                 
         print(annotation)
-        print(annotation.loc[0,'CIGAR'])
-
-
-
+        ### print(annotation.loc[0,'CIGAR'])
+        annotation.to_csv(args.output, sep = '\t', index = False)
