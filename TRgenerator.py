@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from difflib import SequenceMatcher
 
 # config
 let2num = {'A' : 0, 'G' : 1, 'C' : 2, 'T' : 3}

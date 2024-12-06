@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from collections import Counter
-from pysuffixarray.core import SuffixArray
+from collections import defaultdict
 import pydivsufsort
 import edlib
 from TRgenerator import TR_singleMotif, TR_multiMotif
@@ -54,42 +54,46 @@ def paint_dbg(g, pos, filename):
     return 
 
 def find_similar_match(seq:str, motifs:list, max_distances:list):
+    
     seq_bytes = seq.encode('utf-8')
     sa = pydivsufsort.divsufsort(seq_bytes)
     lcp = pydivsufsort.kasai(seq_bytes, sa)
 
-    ### print(sa)
-    ### print(lcp)
+    motif_match_list = []
 
-    motif_match_df = pd.DataFrame(columns=['start', 'end', 'motif', 'seq', 'distance'])
-    for motif_id in range(len(motifs)):
-        motif = motifs[motif_id]
-        ### print(motif) #################
+    motif_positions = defaultdict(list)
+
+    for motif_id, motif in enumerate(motifs):
+        max_distance = max_distances[motif_id]
+        
         idx = 0
         while idx < len(sa):
-            ### print(idx)  #################
             s = seq[sa[idx]:]
-            matches = edlib.align(motif, s, mode = "SHW", task = "path", k = max_distances[motif_id])
-            # do not match
-            if matches['editDistance'] == -1:
+            matches = edlib.align(motif, s, mode="SHW", task="path", k=max_distance)
+
+            if matches['editDistance'] != -1:
+                for start, end in matches['locations']:
+                    motif_positions[motif].append((start + sa[idx], end + 1 + sa[idx], motif, s[start:end + 1], matches['editDistance']))
+                
+                max_match_len = max(end + 1 for start, end in matches['locations'])
+
+                for idx2 in range(idx, len(lcp)):
+                    if lcp[idx2] >= max_match_len:
+                        for start, end in matches['locations']:
+                            motif_positions[motif].append((start + sa[idx2+1], end + 1 + sa[idx2+1], motif, s[start:end + 1], matches['editDistance']))
+                    else:
+                        break
+
+                idx = max(idx, idx2) + 1
+            else:
                 idx += 1
-                continue
-            # have matches
-            l = 0
-            for start, end in matches['locations']:
-                l = max(l, end+1)
-                motif_match_df.loc[motif_match_df.shape[0]] = [start + sa[idx], end + 1 + sa[idx], motif, s[start: end + 1],matches['editDistance']]
-            ### print(matches)  #################
-            for idx2 in range(idx, len(lcp)):
-                if lcp[idx2] >= l:
-                    for start, end in matches['locations']:
-                        motif_match_df.loc[motif_match_df.shape[0]] = [start + sa[idx2+1], end + 1 + sa[idx2+1], motif, s[start: end + 1],matches['editDistance']]
-                else:
-                    break
-            idx = max(idx, idx2) + 1
-            
-    motif_match_df = motif_match_df.sort_values(by=['start'])
-    motif_match_df = motif_match_df.reset_index(drop=True)
+
+    for motif, matches in motif_positions.items():
+        for match in matches:
+            motif_match_list.append(match)
+
+    motif_match_df = pd.DataFrame(motif_match_list, columns=['start', 'end', 'motif', 'seq', 'distance'])
+    motif_match_df = motif_match_df.sort_values(by=['start']).reset_index(drop=True)
 
     return motif_match_df
 
@@ -98,6 +102,7 @@ class Decompose:
         self.sequecne = sequence
         self.ksize = ksize
         self.abud_treshold = 0.1
+        self.abud_min = 3
         self.dist_ratio = 0.4
         self.kmer = None
         self.dbg = None
@@ -111,7 +116,7 @@ class Decompose:
             kmers = [kmer for kmer, _ in mh.kmers_and_hashes(self.sequecne, force=True) ]
             kmer_count = Counter(kmers)
             max_count = kmer_count.most_common(1)[0][1]
-            min_count = max_count * self.abud_treshold
+            min_count = max(self.abud_min, max_count * self.abud_treshold)
             filtered_kmer_count = {k: v for k, v in kmer_count.items() if v >= min_count}
             self.kmer = filtered_kmer_count
         return self.kmer
