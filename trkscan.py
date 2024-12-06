@@ -66,7 +66,7 @@ if __name__ == "__main__":
     # DEFAULT: python trkscan_test.py testData/testData.fasta testData/testData.annotated.bed
     parser = argparse.ArgumentParser(description='TRkScan')
     parser.add_argument('input', type = str, help = 'FASTA file you want to annotate')
-    parser.add_argument('output', type = str, help = 'output BED file')
+    parser.add_argument('output', type = str, help = 'output prefix')
     parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
     parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
     parser.add_argument('-m', '--motif', type = str, default = '', help='reference motif set')  ###### need to add reference set
@@ -247,9 +247,12 @@ if __name__ == "__main__":
                     dp[i] = dp[pre_i] + len(motif) - distance * distance_penalty + bonus
                     pre[i] = (pre_i, idx, motif)
                 
+                if idx % 5000 == 0:
+                    print(f'DP {idx/1000}kbp is Done!')
+
                 idx += 1
         
-        ### print(pre)
+        print('DP complete!')
 
         # retrace
         idx = length
@@ -265,7 +268,7 @@ if __name__ == "__main__":
             else:
                 idx -= 1
   
-        ### print(next)
+        print('Retrace Complete!')
 
         # output motif annotation file
         annotation = pd.DataFrame(columns=['seq','start','end','motif','rep_num','score','CIGAR'])
@@ -370,6 +373,6 @@ if __name__ == "__main__":
             
 
                 
-        print(annotation)
+        ### print(annotation)
         ### print(annotation.loc[0,'CIGAR'])
-        annotation.to_csv(args.output, sep = '\t', index = False)
+        annotation.to_csv(f'{args.output}.concise.tsv', sep = '\t', index = False)
