@@ -202,17 +202,16 @@ if __name__ == "__main__":
             results = list(results)
         
         # merge single motif annotation
-        merged_df = pd.DataFrame(columns=['start', 'end', 'motif', 'seq', 'distance'])
+        merged_list = []
         for pid, _, result in results:
             df = result.annotation
-            df.loc[:,'start'] += (pid - 1) * step_size
-            df.loc[:,'end'] += (pid - 1) * step_size
-            merged_df = pd.concat([merged_df, df], ignore_index = True)
+            df[['start', 'end']] += (pid - 1) * step_size
+            merged_list.append(df)
 
-        merged_df = merged_df.drop_duplicates()
-        merged_df = merged_df.sort_values(by=['end'])
-        merged_df = merged_df.reset_index(drop=True)
-        ### print(merged_df.shape[0])
+        merged_df = pd.concat(merged_list, ignore_index=True)
+        merged_df = merged_df.drop_duplicates().sort_values(by='end').reset_index(drop=True)
+        
+        del results
         ### print(merged_df.loc[:20,])
         
         ##################################
@@ -371,8 +370,4 @@ if __name__ == "__main__":
                     l = tmp.shape[0] - 1
                     annotation.loc[i,'end'] += tmp.loc[l,'old_index'] - tmp.loc[l,'new_index'] 
             
-
-                
-        ### print(annotation)
-        ### print(annotation.loc[0,'CIGAR'])
         annotation.to_csv(f'{args.output}.concise.tsv', sep = '\t', index = False)
