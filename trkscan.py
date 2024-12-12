@@ -1,3 +1,4 @@
+import os
 import argparse
 import pandas as pd
 import edlib
@@ -117,12 +118,15 @@ if __name__ == "__main__":
     # configuration
     ##################################
     # DEFAULT: python trkscan_test.py testData/testData.fasta testData/testData.annotated.bed
+    script_path = os.path.realpath(__file__)
+    script_directory = os.path.dirname(script_path).replace('\\','/')
+
     parser = argparse.ArgumentParser(description='TRkScan')
     parser.add_argument('input', type = str, help = 'FASTA file you want to annotate')
     parser.add_argument('output', type = str, help = 'output prefix')
     parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
     parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
-    parser.add_argument('-m', '--motif', type = str, default = 'data/refMotif.txt', help='reference motif set')  ###### need to add reference set
+    parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.txt', help='reference motif set')  ###### need to add reference set
     parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
     args = parser.parse_args()
     
