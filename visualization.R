@@ -207,6 +207,7 @@ server <- function(input, output, session) {
     }
     result = result[order(result$distance), ]
     rownames(result) <- 1:nrow(result)
+    result$rc = FALSE
     result
   })
   
@@ -229,6 +230,7 @@ server <- function(input, output, session) {
     }
     result = result[order(result$distance), ]
     rownames(result) <- 1:nrow(result)
+    result$rc = TRUE
     result
   })
   
@@ -283,25 +285,29 @@ server <- function(input, output, session) {
     
   })
   
-  
-  
-  output$network <- renderVisNetwork({
+  nodes <- reactive({
     req(motif())
     motif_list <- unique(motif()$motif)
+    data.frame(id = 1:length(motif_list), label = motif()$motif, value = motif()$rep_num)
+  })
+  
+  edges <- reactive({
+    req(motif())
     
-    
-    
-    nodes <- data.frame(id = 1:length(motif_list), label = motif()$motif, value = motif()$rep_num)
-    edges <- data.frame(from = integer(0), to = integer(0), value = integer(0))
-    
-    ########!!!!!!!!!!!!!!!!!!
-    distance_df <- dist()
-    distance_df <- distance_df[order(distance_df$distance), ]
+    motif_list <- unique(motif()$motif)
+    tmp_edges <- data.frame(from = integer(0), to = integer(0), value = integer(0))
 
+    if(input$merge_rc){
+      distance_df <- rbind(dist(),dist_rc())
+    }else{
+      distance_df <- dist()
+    }
+    distance_df <- distance_df[order(distance_df$distance), ]
+    
     # create a empty graph
     g <- make_empty_graph(directed = FALSE)
     g <- add_vertices(g, length(motif_list), name = motif_list)
-
+    
     # add edge in cycle，until number of cluster = X
     num_components <- components(g)$no
     if(num_components > input$num_of_motifs) {
@@ -311,7 +317,10 @@ server <- function(input, output, session) {
         from_id <- which(motif_list == motif1)
         to_id <- which(motif_list == motif2)
         
-        edges <- rbind(edges, data.frame(from = from_id, to = to_id, value = distance_df$distance[i]))
+        tmp_edges <- rbind(tmp_edges, data.frame(from = from_id, to = to_id, 
+                                                 value = min(length(motif1),length(motif2)) - distance_df$distance[i], 
+                                                 label = as.character(distance_df$distance[i]),
+                                                 dashes = distance_df$rc[i]))
         g <- add_edges(g, c(from_id, to_id))
         num_components <- components(g)$no
         if(num_components <= input$num_of_motifs) {
@@ -319,9 +328,15 @@ server <- function(input, output, session) {
         }
       }
     }
+    tmp_edges
+  })
+  
+  output$network <- renderVisNetwork({
+    req(motif())
+    motif_list <- unique(motif()$motif)
     
-    
-    visNetwork(nodes, edges, directed = FALSE)
+
+    visNetwork(nodes(), edges(), directed = FALSE)
   })
   
   ###################################################

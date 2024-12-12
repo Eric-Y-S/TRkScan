@@ -93,6 +93,8 @@ def calculate_distance(ref, query_list):
     for query in query_list:
         if len(ref) >= len(query):
             tmp_ref, tmp_query = query, ref
+        else:
+            tmp_ref, tmp_query = ref, query
         
         rep = len(tmp_query) // len(tmp_ref)
         extended_ref = tmp_ref * rep
