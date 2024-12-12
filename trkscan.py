@@ -4,27 +4,59 @@ import edlib
 from itertools import compress, accumulate
 from stringDecompose import Decompose
 from TRgenerator import TR_multiMotif
+import numpy as np
+import Levenshtein
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from multiprocessing import Pool
 
+class BKTree:
+    def __init__(self, dist_func):
+        self.tree = {}
+        self.dist_func = dist_func
+
+    def add(self, node):
+        if not self.tree:
+            self.tree[node] = {}
+        else:
+            node_added = False
+            for key, children in self.tree.items():
+                dist = self.dist_func(key, node)
+                if dist not in children:
+                    children[dist] = node
+                    node_added = True
+                    break
+            if not node_added:
+                self.tree[node] = {}
+
+    def query(self, node, max_distance):
+        results = []
+        for key, children in self.tree.items():
+            dist = self.dist_func(key, node)
+            if dist <= max_distance:
+                results.append((key, dist))
+            for dist, child in children.items():
+                if dist <= max_distance:
+                    results.append((child, dist))
+        return results
+
 def find_N(task):
     pid, total_task, sequence = task
-    N_coordinate = pd.DataFrame(columns=['start','end'])
+    N_coordinates = []
     start = None
-    for i in range(len(sequence)):
-        if sequence[i] == 'N':
-            if start is None:
-                start = i
-        else:
-            if start is not None:
-                N_coordinate.loc[N_coordinate.shape[0],] = [start, i]
-                start = None
+    for i, char in enumerate(sequence):
+        if char == 'N' and start is None:
+            start = i
+        elif char != 'N' and start is not None:
+            N_coordinates.append((start, i))
+            start = None
     if start is not None:
-        N_coordinate.loc[N_coordinate.shape[0],] = [start, len(sequence) - 1]
+        N_coordinates.append((start, len(sequence)))
+    
+    N_coordinate_df = pd.DataFrame(N_coordinates, columns=['start', 'end'])
     print(f'Process N Complete: {pid}/{total_task}')
-    return ( pid, total_task, N_coordinate )
+    return ( pid, total_task, N_coordinate_df )
 
 def decompose_sequence(task):
     pid, total_task, sequence, ksize = task
@@ -45,19 +77,40 @@ def rolling_same(seq1, seq2):
     if len(seq1) != len(seq2):
         return False
     seq1double = seq1 * 2
-    for i in range(len(seq1)):
-        seq1_new = seq1double[i : i + len(seq1)]
-        if seq1_new == seq2:
-            return True
-    return False
+    return seq2 in seq1double
 
-def get_cigar(ref, query):
+def get_distacne_and_cigar(ref, query):
     matches = edlib.align(query, ref, mode = "NW", task = "path")
-    return matches['cigar']
+    return matches['editDistance'], matches['cigar']
 
-def get_distacne(ref, query):
-    matches = edlib.align(query, ref, mode = "NW", task = "path")
-    return matches['editDistance']
+def rc(seq):
+    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    return ''.join(complement[base] for base in reversed(seq))
+
+def calculate_distance(ref, query_list):
+    min_dist_list = []
+    for query in query_list:
+        if len(ref) >= len(query):
+            tmp_ref, tmp_query = query, ref
+        
+        rep = len(tmp_query) // len(tmp_ref)
+        extended_ref = tmp_ref * rep
+        extended_ref_rc = rc(tmp_ref) * rep
+        ### print(extended_ref, extended_ref_rc)
+        min_dist1, min_dist2 = len(extended_ref), len(extended_ref_rc)
+        for i in range(len(tmp_query)):
+            rolling_query = tmp_query[i:] + tmp_query[:i]
+            matches_ref = edlib.align(rolling_query, extended_ref, mode="NW", task="distance")
+            min_dist1 = min(min_dist1, matches_ref['editDistance'])
+
+            matches_ref_rc = edlib.align(rolling_query, extended_ref_rc, mode="NW", task="distance")
+            min_dist2 = min(min_dist2, matches_ref_rc['editDistance'])
+        min_dist_list.append(f'{min_dist1},{min_dist2}')
+    return min_dist_list
+
+def rotate_strings(s):
+    n = len(s)
+    return [s[i:] + s[:i] for i in range(n)]
 
 if __name__ == "__main__":
     ##################################
@@ -69,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument('output', type = str, help = 'output prefix')
     parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
     parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
-    parser.add_argument('-m', '--motif', type = str, default = '', help='reference motif set')  ###### need to add reference set
+    parser.add_argument('-m', '--motif', type = str, default = 'data/refMotif.txt', help='reference motif set')  ###### need to add reference set
     parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
     args = parser.parse_args()
     
@@ -98,6 +151,17 @@ if __name__ == "__main__":
     with open(args.input, "r") as handle:
         records = list(SeqIO.parse(handle, "fasta"))
 
+    ##################################
+    # read reference motif set
+    ##################################
+    tree = BKTree(Levenshtein.distance)
+    with open(args.motif, "r") as motifDB:
+        for line in motifDB:
+            tree.add(line.strip())
+
+
+
+    annotation_list = []
     for record in records:
         seq_name = record.name
         print(f'Start Processing [{seq_name}]')
@@ -106,8 +170,8 @@ if __name__ == "__main__":
         # deal with N character          
         ##################################
         seq = str(record.seq)
-        seqLen = len(seq)
-        total_task = max(1, int((seqLen - window_size) / step_size + 1) )
+        seqLenwN = len(seq)
+        total_task = max(1, int((seqLenwN - window_size) / step_size + 1) )
         with Pool(processes = args.thread) as pool:
             cur = 0
             tasks = []
@@ -119,26 +183,33 @@ if __name__ == "__main__":
             pool.join()     # wait for all the tasks to complete
             results = list(results)
         
-        N_coordinate = pd.DataFrame(columns=['start', 'end'])
+        merged_list = []
         for pid, _, result in results:
-            result.loc[:,'start'] += (pid - 1) * window_size
-            result.loc[:,'end'] += (pid - 1) * window_size
-            N_coordinate = pd.concat([N_coordinate, result], ignore_index = True)
+            result[['start', 'end']] += (pid - 1) * window_size
+            merged_list.append(result)
 
-        N_coordinate = N_coordinate.sort_values(by=['start'])
-        N_coordinate = N_coordinate.reset_index(drop=True)
+        N_coordinate = pd.concat(merged_list, ignore_index=True)
+        N_coordinate = N_coordinate.sort_values(by=['start']).reset_index(drop=True)
 
-        if N_coordinate.shape[0]:
+        if N_coordinate.shape[0] > 0:
             N_coordinate_new = pd.DataFrame(columns=['start', 'end'])
-            start = N_coordinate.loc[0, 'start']
-            for i in range(N_coordinate.shape[0]-1):
-                if N_coordinate.loc[i, 'end'] != N_coordinate.loc[i+1, 'start']:
-                    N_coordinate_new.loc[N_coordinate_new.shape[0], ] = [start, N_coordinate.loc[i, 'end']]
-                    start = N_coordinate.loc[i+1, 'start']
 
-            N_coordinate_new.loc[N_coordinate_new.shape[0], ] = [start, N_coordinate.loc[N_coordinate.shape[0] - 1, 'end']]
+            start = N_coordinate.loc[0, 'start']
+            end = N_coordinate.loc[0, 'end']
+            for i in range(1, N_coordinate.shape[0]):
+                if N_coordinate.loc[i, 'start'] != end:
+                    N_coordinate_new = pd.concat([N_coordinate_new, pd.DataFrame({'start': [start], 'end': [end]})], ignore_index=True)
+                    start = N_coordinate.loc[i, 'start']
+                end = N_coordinate.loc[i, 'end']
+
+            # add the last region
+            N_coordinate_new = pd.concat([N_coordinate_new, pd.DataFrame({'start': [start], 'end': [end]})], ignore_index=True)
+
+            # solve with 'old_index' and 'new_index'
             N_coordinate_new['old_index'] = N_coordinate_new['end']
             N_coordinate_new['new_index'] = N_coordinate_new['end']
+
+            # calculate new index
             l = 0
             for i in range(N_coordinate_new.shape[0]):
                 l += N_coordinate_new.loc[i,'end'] - N_coordinate_new.loc[i,'start']
@@ -151,8 +222,8 @@ if __name__ == "__main__":
         ##################################
         mask = [base != "N" for base in seq]
         filter_seq = ''.join(compress(seq, mask))
-        seqLen = len(filter_seq)
-        total_task = max(1, int((seqLen - window_size) / step_size + 1) )
+        seqLenwoN = len(filter_seq)
+        total_task = max(1, int((seqLenwoN - window_size) / step_size + 1) )
 
         ##################################
         # get motifs
@@ -184,11 +255,27 @@ if __name__ == "__main__":
             if not is_dup:
                 nondup.append(motifs[idx])
 
+        nondup_adjusted = []
+        for motif in nondup:
+            min_distance = 1e6
+            best_motif = motif
+            sequences = rotate_strings(motif)
+            max_distance = int(0.5 * len(motif))
+            for seq in sequences:
+                ### print(f'xxxxx:{seq}')
+                matches = tree.query(seq, max_distance)
+                for ref, dist in matches:
+                    ### print(ref, dist)
+                    if dist < min_distance:
+                        best_motif = seq
+                        min_distance = dist
+            nondup_adjusted.append(best_motif)
+            ### print(best_motif)
+
+        print(nondup_adjusted)
+
         for pid, _, result in results:
-            result.motifs_list = nondup
-
-        print(nondup)
-
+            result.motifs_list = nondup_adjusted
 
         ##################################
         # annotate single motif
@@ -212,7 +299,6 @@ if __name__ == "__main__":
         merged_df = merged_df.drop_duplicates().sort_values(by='end').reset_index(drop=True)
         
         del results
-        ### print(merged_df.loc[:20,])
         
         ##################################
         # DP to link
@@ -220,16 +306,16 @@ if __name__ == "__main__":
         # parameters
         gap_penalty = 1
         distance_penalty = 1
-        perfect_bonus = 0.5    ######## need to change !!!!!!!!!!
+        perfect_bonus = 0.5
 
         length = len(filter_seq)
-        dp = [0] * (length + 1)     # dp[i] means sep[:i] score sum
-        pre = [(None, None, None) for i in range(length + 1)]   # (pre_i, motif_id, motif)
+        dp = np.zeros(length + 1, dtype=np.float64)  # dp[i] means sep[:i] score sum
+        pre = np.full((length + 1, 3), None)  # (pre_i, motif_id, motif)
         idx = 0
         for i in range(1, length + 1):
             # skip one base
-            if dp[i-1] - 1 > 0:
-                dp[i] = dp[i-1] - 1
+            if dp[i-1] - gap_penalty  > 0:
+                dp[i] = dp[i-1] - gap_penalty 
                 pre[i] = (i-1, None, None)
             
             while idx < merged_df.shape[0] and merged_df.loc[idx, 'end'] <= i:
@@ -242,15 +328,15 @@ if __name__ == "__main__":
                 distance = merged_df.loc[idx,'distance']
                 bonus = perfect_bonus * len(motif) if distance == 0 else 0
                 
-                if dp[merged_df.loc[idx,'start']] + len(motif) - distance * distance_penalty + bonus >= dp[i]:
+                if dp[pre_i] + len(motif) - distance * distance_penalty + bonus >= dp[i]:
                     dp[i] = dp[pre_i] + len(motif) - distance * distance_penalty + bonus
                     pre[i] = (pre_i, idx, motif)
-                
-                if idx % 5000 == 0:
-                    print(f'DP {idx/1000}kbp is Done!')
 
                 idx += 1
-        
+
+            if i % 5000 == 0:
+                print(f'DP: {i // 1000} kbp is Done!')
+
         print('DP complete!')
 
         # retrace
@@ -270,7 +356,7 @@ if __name__ == "__main__":
         print('Retrace Complete!')
 
         # output motif annotation file
-        annotation = pd.DataFrame(columns=['seq','start','end','motif','rep_num','score','CIGAR'])
+        annotation_data = []
         idx = 0
         
         while idx < length:
@@ -284,7 +370,7 @@ if __name__ == "__main__":
                         if cur_motif != next[idx2][1]:       # split the annotation and init
                             ### print(f'{cur_motif} -> {next[idx2][1]}')
                             if cur_motif != None:
-                                annotation.loc[annotation.shape[0], ] = row
+                                annotation_data.append(row)
                                 start, end, cur_motif, rep_num, score, max_score, cigar_string  = idx2, idx2, next[idx2][1], 0, 0, 0, ''
                                 skip_num = 0
                             else:
@@ -297,10 +383,11 @@ if __name__ == "__main__":
 
                         ### print(rep_num)
                         rep_num += 1
-                        score += len(cur_motif) - get_distacne(next[idx2][1], filter_seq[idx2 : next[idx2][0]]) * distance_penalty
-                        cigar_string += get_cigar(next[idx2][1], filter_seq[idx2 : next[idx2][0]]) + '/'
+                        distance, cigar = get_distacne_and_cigar(next[idx2][1], filter_seq[idx2 : next[idx2][0]])
+                        score += len(cur_motif) - distance * distance_penalty
+                        cigar_string += cigar + '/'
                         if score >= max_score:
-                            row = [seq_name, start, next[idx2][0], cur_motif, rep_num, score, cigar_string]
+                            row = [seq_name, seqLenwN, start, next[idx2][0], cur_motif, rep_num, score, cigar_string]
                             max_score = score
                     else:               # skip a base
                         if idx2 != 0:
@@ -309,11 +396,13 @@ if __name__ == "__main__":
                 
                     idx2 = next[idx2][0]
                     end = idx2
-                annotation.loc[annotation.shape[0], ] = row
+                annotation_data.append(row)
 
             idx += 1
 
+        annotation = pd.DataFrame(annotation_data, columns=['seq','length','start','end','motif','rep_num','score','CIGAR'])
         annotation = annotation.reset_index(drop=True)
+        
         ### print(annotation)
         
         # coordinates transformation with N character
@@ -369,5 +458,73 @@ if __name__ == "__main__":
                     tmp = tmp.reset_index(drop=True)
                     l = tmp.shape[0] - 1
                     annotation.loc[i,'end'] += tmp.loc[l,'old_index'] - tmp.loc[l,'new_index'] 
-            
-        annotation.to_csv(f'{args.output}.concise.tsv', sep = '\t', index = False)
+        ### print(annotation)
+        annotation_list.append(annotation)
+        
+    merged_annotation = pd.concat(annotation_list, ignore_index=True)
+    merged_annotation.to_csv(f'{args.output}.concise.tsv', sep = '\t', index = False)
+
+    ##################################
+    # make file - *.annotation.tsv
+    ##################################
+    detail_annotation = []
+    for record in records:
+        seq_name = record.name
+        sequence = str(record.seq)
+        seqLen = len(sequence)
+        tmp = merged_annotation[merged_annotation['seq'] == seq_name]
+        ### print(tmp)
+        
+        for index, row in tmp.iterrows():
+            idx = row.start
+            cigar_string = row.CIGAR
+            j = 0
+            start, length, actual_motif, sub_cigar, num = row.start, 0, '', '', ''
+            while j < len(cigar_string):
+                symbol = cigar_string[j]
+                if symbol == '/':
+                    detail_annotation.append([seq_name, seqLen, start, start + length, row.motif, actual_motif, sub_cigar])
+                    start = start + length
+                    length, actual_motif, sub_cigar = 0, '', ''
+                elif symbol in ['=','X','I']:
+                    actual_motif += sequence[start + length : start + length + int(num)]
+                    length += int(num)
+                    sub_cigar += f'{num}{symbol}'
+                    num = ''
+                elif symbol == 'D':
+                    sub_cigar += f'{num}D'
+                    num = ''
+                elif symbol == 'N':
+                    length += int(num)
+                    sub_cigar += f'{num}N'
+                    num = ''
+                else:   # symbol == number
+                    num += symbol
+                j += 1
+            ### detail_annotation.append([seq_name, seqLen, start, start + length, row.motif, actual_motif, sub_cigar])
+
+    detailed_df = pd.DataFrame(data = detail_annotation, columns = ['seq','length','start','end','motif','actual_motif','CIGAR'])
+    detailed_df.to_csv(f'{args.output}.annotation.tsv', sep = '\t', index = False)
+
+
+    ##################################
+    # make file - *.motif.tsv
+    ##################################
+    rep_num = []
+    motifs_list = list(set(merged_annotation['motif'].to_list()))
+    for motif in motifs_list:
+        tmp = merged_annotation[merged_annotation['motif'] == motif]
+        rep_num.append(sum(tmp['rep_num']))
+
+    data = {'motif': motifs_list, 'rep_num': rep_num}
+    motif_df = pd.DataFrame(data = data)
+
+    # calculate distance
+    for motif in motifs_list:
+        motif_df[motif] = calculate_distance(motif, motifs_list)
+    motif_df.to_csv(f'{args.output}.motif.tsv', sep = '\t', index = False)
+
+
+
+
+

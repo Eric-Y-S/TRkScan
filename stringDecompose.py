@@ -101,7 +101,7 @@ class Decompose:
     def __init__(self, sequence, ksize):
         self.sequecne = sequence
         self.ksize = ksize
-        self.abud_treshold = 0.1
+        self.abud_treshold = 0.01
         self.abud_min = 3
         self.dist_ratio = 0.4
         self.kmer = None
