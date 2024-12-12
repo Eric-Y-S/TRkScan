@@ -9,7 +9,7 @@ import pydivsufsort
 import edlib
 from TRgenerator import TR_singleMotif, TR_multiMotif
 
-IS_PAINT = True    # if you want to plot dbg, set True; visualization is unless for complex TR region
+IS_PAINT = False    # if you want to plot dbg, set True; visualization is unless for complex TR region
 
 # calculate layout for graph
 def calculate_circular_layout(g):
