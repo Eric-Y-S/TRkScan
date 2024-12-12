@@ -315,7 +315,7 @@ if __name__ == "__main__":
         perfect_bonus = 0.5
 
         length = len(filter_seq)
-        '''dp = np.zeros(length + 1, dtype=np.float64)  # dp[i] means sep[:i] score sum
+        dp = np.zeros(length + 1, dtype=np.float64)  # dp[i] means sep[:i] score sum
         pre = np.full((length + 1, 3), None)  # (pre_i, motif_id, motif)
         idx = 0
         for i in range(1, length + 1):
@@ -343,65 +343,18 @@ if __name__ == "__main__":
             if i % 5000 == 0:
                 print(f'DP: {i // 1000} kbp is Done!')
 
-        print('DP complete!')'''
-
-        # Initialize dp and pre arrays
-        dp = np.zeros(length + 1, dtype=np.float64)
-        pre = np.full((length + 1, 3), None)  # (pre_i, motif_id, motif)
-
-        # Preprocess merged_df into numpy arrays for faster access
-        merged_start = merged_df['start'].values
-        merged_end = merged_df['end'].values
-        merged_motif = merged_df['motif'].values
-        merged_distance = merged_df['distance'].values
-
-        idx = 0
-
-        # Dynamic programming loop
-        for i in range(1, length + 1):
-            # Skip one base
-            if dp[i-1] - gap_penalty > 0:
-                dp[i] = dp[i-1] - gap_penalty
-                pre[i] = (i-1, None, None)
-
-            # Efficiently iterate over merged_df without repeating checks
-            while idx < len(merged_df) and merged_end[idx] <= i:
-                if merged_end[idx] < i:
-                    idx += 1
-                    continue
-
-                pre_i = merged_start[idx]
-                motif = merged_motif[idx]
-                distance = merged_distance[idx]
-                bonus = perfect_bonus * len(motif) if distance == 0 else 0
-
-                score = dp[pre_i] + len(motif) - distance * distance_penalty + bonus
-                if score >= dp[i]:
-                    dp[i] = score
-                    pre[i] = (pre_i, idx, motif)
-
-                idx += 1
-
-            # Print progress every 5000 iterations
-            if i % 5000 == 0:
-                print(f'DP: {i // 1000} kbp is Done!')
-
         print('DP complete!')
 
         # retrace
         idx = length
-        next_coords = [None] * (length + 1)  # to store next coordinates
-        next_motif = [None] * (length + 1)   # to store motif references
-
+        next = [(None, None) for i in range(length+1)] # (next coordinate, reference motif)
         while idx >= 0:
-            if pre[idx][0] is not None:
-                if pre[idx][1] is not None:  # matched a motif
-                    next_coords[pre[idx][0]] = idx
-                    next_motif[pre[idx][0]] = merged_motif[pre[idx][1]]
+            if pre[idx][0] != None:
+                if pre[idx][1] != None:        # match a motif
+                    next[pre[idx][0]] = (idx, merged_df.loc[pre[idx][1],'motif'])
                     idx = pre[idx][0]
-                else:  # skipped a base
-                    next_coords[idx - 1] = idx
-                    next_motif[idx - 1] = None
+                else:                          # skip a base
+                    next[idx - 1] = (idx, None)
                     idx -= 1
             else:
                 idx -= 1
@@ -413,38 +366,41 @@ if __name__ == "__main__":
         idx = 0
         
         while idx < length:
-            if pre[idx][0] is None and next_coords[idx] is not None:    # is a start site
+            if pre[idx][0] == None and next[idx][0] != None:    # is a start site
                 idx2 = idx
-                start, end = idx, 0
-                cur_motif, rep_num, score, max_score, cigar_string = None, 0, 0, 0, ''
+                start, end, cur_motif, rep_num, score, max_score, cigar_string  = idx, 0, None, 0, 0, 0, ''
                 skip_num = 0
-                while next_coords[idx2] != None:
-                    motif = next_motif[idx2]
-                    if motif is not None:    # match a motif 
-                        if cur_motif != motif:       # split the annotation and init
+                while next[idx2][0] != None:
+                    if next[idx2][1]:    # match a motif 
+                        ### print(next[idx2][1])   ###########################
+                        if cur_motif != next[idx2][1]:       # split the annotation and init
+                            ### print(f'{cur_motif} -> {next[idx2][1]}')
                             if cur_motif != None:
                                 annotation_data.append(row)
-                            start, cur_motif, rep_num, score, max_score, cigar_string = idx2, motif, 0, 0, 0, ''
-                            skip_num = 0
+                                start, end, cur_motif, rep_num, score, max_score, cigar_string  = idx2, idx2, next[idx2][1], 0, 0, 0, ''
+                                skip_num = 0
+                            else:
+                                cur_motif = next[idx2][1]
 
                         if skip_num:
                             cigar_string += f'{skip_num}N'
                             score -= skip_num * gap_penalty
                             skip_num = 0
 
+                        ### print(rep_num)
                         rep_num += 1
-                        distance, cigar = get_distacne_and_cigar(motif, filter_seq[idx2: next_coords[idx2]])
+                        distance, cigar = get_distacne_and_cigar(next[idx2][1], filter_seq[idx2 : next[idx2][0]])
                         score += len(cur_motif) - distance * distance_penalty
                         cigar_string += cigar + '/'
                         if score >= max_score:
-                            row = [seq_name, seqLenwN, start, next_coords[idx2], motif, rep_num, score, cigar_string]
+                            row = [seq_name, seqLenwN, start, next[idx2][0], cur_motif, rep_num, score, cigar_string]
                             max_score = score
                     else:               # skip a base
                         if idx2 != 0:
                             ### print(idx2)
                             skip_num += 1
                 
-                    idx2 = next_coords[idx2]
+                    idx2 = next[idx2][0]
                     end = idx2
                 annotation_data.append(row)
 
