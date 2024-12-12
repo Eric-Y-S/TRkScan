@@ -9,7 +9,7 @@ import pydivsufsort
 import edlib
 from TRgenerator import TR_singleMotif, TR_multiMotif
 
-IS_PAINT = False    # if you want to plot dbg, set True; visualization is unless for complex TR region
+IS_PAINT = True    # if you want to plot dbg, set True; visualization is unless for complex TR region
 
 # calculate layout for graph
 def calculate_circular_layout(g):
@@ -112,7 +112,7 @@ class Decompose:
 
     def count_kmers(self):
         if self.kmer is None:
-            mh = sourmash.MinHash(n = 1000, ksize = self.ksize + 1)
+            mh = sourmash.MinHash(n = 5000, ksize = self.ksize + 1)
             kmers = [kmer for kmer, _ in mh.kmers_and_hashes(self.sequecne, force=True) ]
             kmer_count = Counter(kmers)
             max_count = kmer_count.most_common(1)[0][1]
