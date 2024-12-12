@@ -315,36 +315,6 @@ if __name__ == "__main__":
         perfect_bonus = 0.5
 
         length = len(filter_seq)
-        '''dp = np.zeros(length + 1, dtype=np.float64)  # dp[i] means sep[:i] score sum
-        pre = np.full((length + 1, 3), None)  # (pre_i, motif_id, motif)
-        idx = 0
-        for i in range(1, length + 1):
-            # skip one base
-            if dp[i-1] - gap_penalty  > 0:
-                dp[i] = dp[i-1] - gap_penalty 
-                pre[i] = (i-1, None, None)
-            
-            while idx < merged_df.shape[0] and merged_df.loc[idx, 'end'] <= i:
-                if merged_df.loc[idx, 'end'] < i:
-                    idx += 1
-                    continue
-                
-                pre_i = merged_df.loc[idx, 'start']
-                motif = merged_df.loc[idx,'motif']
-                distance = merged_df.loc[idx,'distance']
-                bonus = perfect_bonus * len(motif) if distance == 0 else 0
-                
-                if dp[pre_i] + len(motif) - distance * distance_penalty + bonus >= dp[i]:
-                    dp[i] = dp[pre_i] + len(motif) - distance * distance_penalty + bonus
-                    pre[i] = (pre_i, idx, motif)
-
-                idx += 1
-
-            if i % 5000 == 0:
-                print(f'DP: {i // 1000} kbp is Done!')
-
-        print('DP complete!')'''
-
         # Initialize dp and pre arrays
         dp = np.zeros(length + 1, dtype=np.float64)
         pre = np.full((length + 1, 3), None)  # (pre_i, motif_id, motif)
@@ -561,17 +531,21 @@ if __name__ == "__main__":
     # make file - *.motif.tsv
     ##################################
     rep_num = []
-    motifs_list = list(set(merged_annotation['motif'].to_list()))
+    motif_group = merged_annotation.groupby('motif')['rep_num'].sum().reset_index()
+    motif_df = motif_group[['motif', 'rep_num']].copy()
+    motif_df = motif_df.sort_values(by=['rep_num'], ascending = False).reset_index(drop=True)
+    motifs_list = motif_df['motif'].to_list()
+    ### print(motifs_list)
+    
+    all_distances = []
     for motif in motifs_list:
-        tmp = merged_annotation[merged_annotation['motif'] == motif]
-        rep_num.append(sum(tmp['rep_num']))
+        distances = calculate_distance(motif, motifs_list)
+        all_distances.append(distances)
 
-    data = {'motif': motifs_list, 'rep_num': rep_num}
-    motif_df = pd.DataFrame(data = data)
+    distance_df = pd.DataFrame(all_distances, columns = motifs_list)
+    motif_df = pd.concat([motif_df, distance_df], axis=1)
 
-    # calculate distance
-    for motif in motifs_list:
-        motif_df[motif] = calculate_distance(motif, motifs_list)
+    
     motif_df.to_csv(f'{args.output}.motif.tsv', sep = '\t', index = False)
 
 
