@@ -2,6 +2,7 @@ import os
 import argparse
 import pandas as pd
 import edlib
+from pybktree import BKTree
 from itertools import compress, accumulate
 from stringDecompose import Decompose
 from TRgenerator import TR_multiMotif
@@ -12,35 +13,6 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from multiprocessing import Pool
 
-class BKTree:
-    def __init__(self, dist_func):
-        self.tree = {}
-        self.dist_func = dist_func
-
-    def add(self, node):
-        if not self.tree:
-            self.tree[node] = {}
-        else:
-            node_added = False
-            for key, children in self.tree.items():
-                dist = self.dist_func(key, node)
-                if dist not in children:
-                    children[dist] = node
-                    node_added = True
-                    break
-            if not node_added:
-                self.tree[node] = {}
-
-    def query(self, node, max_distance):
-        results = []
-        for key, children in self.tree.items():
-            dist = self.dist_func(key, node)
-            if dist <= max_distance:
-                results.append((key, dist))
-            for dist, child in children.items():
-                if dist <= max_distance:
-                    results.append((child, dist))
-        return results
 
 def find_N(task):
     pid, total_task, sequence = task
@@ -160,10 +132,11 @@ if __name__ == "__main__":
     ##################################
     # read reference motif set
     ##################################
-    tree = BKTree(Levenshtein.distance)
-    with open(args.motif, "r") as motifDB:
+    tree = BKTree(Levenshtein.distance)  # 使用 Levenshtein 距离
+
+    with open(args.motif, 'r') as motifDB:
         for line in motifDB:
-            tree.add(line.strip())
+            tree.add(line.strip())  # 向树中添加每个motif
 
 
 
@@ -265,18 +238,18 @@ if __name__ == "__main__":
         for motif in nondup:
             min_distance = 1e6
             best_motif = motif
-            sequences = rotate_strings(motif)
-            max_distance = int(0.5 * len(motif))
+            sequences = rotate_strings(motif)  # 获取所有旋转的变体
+            max_distance = int(0.5 * len(motif))  # 设置最大允许的距离
             for seq in sequences:
-                ### print(f'xxxxx:{seq}')
-                matches = tree.query(seq, max_distance)
-                for ref, dist in matches:
-                    ### print(ref, dist)
+                ### print(f'############## 当前查询: {seq}')
+                matches = tree.find(seq, max_distance)  # 查询匹配的motif
+                ### print(matches)
+                for dist, ref  in matches:
+                    ### print(f'匹配: {ref} 距离: {dist}')
                     if dist < min_distance:
                         best_motif = seq
                         min_distance = dist
             nondup_adjusted.append(best_motif)
-            ### print(best_motif)
 
         print(nondup_adjusted)
 
@@ -545,7 +518,6 @@ if __name__ == "__main__":
     distance_df = pd.DataFrame(all_distances, columns = motifs_list)
     motif_df = pd.concat([motif_df, distance_df], axis=1)
 
-    
     motif_df.to_csv(f'{args.output}.motif.tsv', sep = '\t', index = False)
 
 
