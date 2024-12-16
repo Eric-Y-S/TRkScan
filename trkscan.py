@@ -1,35 +1,43 @@
 import os
 import argparse
+import subprocess
 import pandas as pd
 import edlib
 from pybktree import BKTree
-from itertools import compress, accumulate
+from itertools import compress
 from stringDecompose import Decompose
-from TRgenerator import TR_multiMotif
 import numpy as np
 import Levenshtein
-from Bio import SeqIO
+from Bio import SeqIO   # I/O processing
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-from multiprocessing import Pool
-
+from multiprocessing import Pool    # multi-thread
+import time
 
 def find_N(task):
     pid, total_task, sequence = task
     N_coordinates = []
     start = None
-    for i, char in enumerate(sequence):
-        if char == 'N' and start is None:
-            start = i
-        elif char != 'N' and start is not None:
-            N_coordinates.append((start, i))
+
+    sequence = np.array(list(sequence))
+    n_indices = np.where(sequence == 'N')[0]
+    if len(n_indices) == 0:
+        print(f'Process N Complete: {pid}/{total_task}')
+        return pd.DataFrame(columns=['start', 'end'])
+    
+    for i in range(len(n_indices)):
+        if start is None:
+            start = n_indices[i]
+        if i == len(n_indices) - 1 or n_indices[i+1] != n_indices[i] + 1:
+            end = n_indices[i] + 1
+            N_coordinates.append((start, end))
             start = None
-    if start is not None:
-        N_coordinates.append((start, len(sequence)))
     
     N_coordinate_df = pd.DataFrame(N_coordinates, columns=['start', 'end'])
+    N_coordinate_df[['start', 'end']] += (pid - 1) * window_size
     print(f'Process N Complete: {pid}/{total_task}')
-    return ( pid, total_task, N_coordinate_df )
+
+    return N_coordinate_df
 
 def decompose_sequence(task):
     pid, total_task, sequence, ksize = task
@@ -43,8 +51,11 @@ def decompose_sequence(task):
 def single_motif_annotation(task):
     pid, total_task, seg = task
     seg.annotate_with_motif()
+    df = seg.annotation
+    df[['start', 'end']] += (pid - 1) * step_size
+    df = df.sort_values(by='end').reset_index(drop=True)
+    df.to_csv(f'{args.output}_temp/seg_anno_{pid}.csv', index = False)
     print(f'Single Motif Annotation Complete: {pid}/{total_task}')
-    return ( pid, total_task, seg )
 
 def rolling_same(seq1, seq2):
     if len(seq1) != len(seq2):
@@ -87,42 +98,42 @@ def rotate_strings(s):
     n = len(s)
     return [s[i:] + s[:i] for i in range(n)]
 
+
+
+
+##################################
+# configuration
+##################################
+script_path = os.path.realpath(__file__)
+script_directory = os.path.dirname(script_path).replace('\\','/')
+window_size = 5000
+overlap_size = 1000
+step_size = window_size - overlap_size
+is_test = True
+
+# DEFAULT: python trkscan_test.py testData/testData.fasta testData/testData.annotated.bed
+parser = argparse.ArgumentParser(description='TRkScan')
+parser.add_argument('input', type = str, help = 'FASTA file you want to annotate')
+parser.add_argument('output', type = str, help = 'output prefix')
+parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
+parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
+parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.txt', help='reference motif set')  ###### need to add reference set
+parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
+args = parser.parse_args()
+
+args.input = args.input.replace('\\','/')
+args.output = args.output.replace('\\','/')
+os.makedirs(f'{args.output}_temp', exist_ok=True)
+
+
+
+
+
 if __name__ == "__main__":
-    ##################################
-    # configuration
-    ##################################
-    # DEFAULT: python trkscan_test.py testData/testData.fasta testData/testData.annotated.bed
-    script_path = os.path.realpath(__file__)
-    script_directory = os.path.dirname(script_path).replace('\\','/')
-
-    parser = argparse.ArgumentParser(description='TRkScan')
-    parser.add_argument('input', type = str, help = 'FASTA file you want to annotate')
-    parser.add_argument('output', type = str, help = 'output prefix')
-    parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
-    parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
-    parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.txt', help='reference motif set')  ###### need to add reference set
-    parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
-    args = parser.parse_args()
-    
-    window_size = 5000
-    step_size = 4000
-
-    ##################################
-    # generate test data
-    ##################################
-    if False:
-        test_data = TR_multiMotif(['AATGG','CCATT','CTT'], 13000, 0.1, seed)
-        test_seq = Seq(test_data.sequence)
-        test_record = SeqRecord(test_seq, id = "testSeq", description = '')
-
-        with open("testData/testData.fasta", "w") as handle:
-            SeqIO.write(test_record, handle, "fasta")
-        df = test_data.annotation
-        df.to_csv('testData/testData_annotation.tsv', sep = '\t', index = False)
-        df = test_data.annotation_woMut
-        df.to_csv('testData/testData_annotation_woMut.tsv', sep = '\t', index = False)
 
 
+    if is_test:
+        start_time = time.time()
     ##################################
     # read data
     ##################################
@@ -132,12 +143,14 @@ if __name__ == "__main__":
     ##################################
     # read reference motif set
     ##################################
-    tree = BKTree(Levenshtein.distance)  # 使用 Levenshtein 距离
+    tree = BKTree(Levenshtein.distance)  # use Levenshtein distance
 
     with open(args.motif, 'r') as motifDB:
         for line in motifDB:
-            tree.add(line.strip())  # 向树中添加每个motif
-
+            tree.add(line.strip())  # add motif
+    if is_test:
+        end_time = time.time()
+        print(f"read data: {end_time - start_time} s")
 
 
     annotation_list = []
@@ -145,30 +158,28 @@ if __name__ == "__main__":
         seq_name = record.name
         print(f'Start Processing [{seq_name}]')
 
+        if is_test:
+            start_time = time.time()
         ##################################
         # deal with N character          
         ##################################
         seq = str(record.seq)
         seqLenwN = len(seq)
-        total_task = max(1, int((seqLenwN - window_size) / step_size + 1) )
-        with Pool(processes = args.thread) as pool:
-            cur = 0
-            tasks = []
-            while cur < total_task:
-                tasks.append(tuple([cur + 1, total_task, seq[cur*step_size : cur*step_size + step_size]]))
-                cur += 1
-            results = pool.imap_unordered(find_N, tasks)
-            pool.close()    # close the pool and don't receive any new tasks
-            pool.join()     # wait for all the tasks to complete
-            results = list(results)
+        total_task = max(1, (seqLenwN - window_size) // step_size + 1)
         
-        merged_list = []
-        for pid, _, result in results:
-            result[['start', 'end']] += (pid - 1) * window_size
-            merged_list.append(result)
-
-        N_coordinate = pd.concat(merged_list, ignore_index=True)
+        tasks = [(cur + 1, total_task, seq[cur * step_size : (cur + 1) * step_size]) for cur in range(total_task)]
+        t = time.time() 
+        with Pool(processes = args.thread) as pool:
+            results = pool.map(find_N, tasks)
+            #pool.close()    # close the pool and don't receive any new tasks
+            #pool.join()     # wait for all the tasks to complete
+            #results = list(results)
+        tt = time.time()
+        print(f"slice: {tt - t} s")
+        N_coordinate = pd.concat(results, ignore_index=True)
         N_coordinate = N_coordinate.sort_values(by=['start']).reset_index(drop=True)
+
+        ### print(N_coordinate)
 
         if N_coordinate.shape[0] > 0:
             N_coordinate_new = pd.DataFrame(columns=['start', 'end'])
@@ -195,6 +206,10 @@ if __name__ == "__main__":
                 N_coordinate_new.loc[i,'new_index'] -= l
 
             ### print(N_coordinate_new)  #############################
+        
+        if is_test:
+            end_time = time.time()
+            print(f"calculate index transformation: {end_time - start_time} s")
 
         ##################################
         # split into windows to decompose
@@ -204,6 +219,9 @@ if __name__ == "__main__":
         seqLenwoN = len(filter_seq)
         total_task = max(1, int((seqLenwoN - window_size) / step_size + 1) )
 
+        
+        if is_test:
+            start_time = time.time()
         ##################################
         # get motifs
         ##################################
@@ -251,11 +269,17 @@ if __name__ == "__main__":
                         min_distance = dist
             nondup_adjusted.append(best_motif)
 
-        print(nondup_adjusted)
+        ### print(nondup_adjusted)
 
         for pid, _, result in results:
             result.motifs_list = nondup_adjusted
 
+        if is_test:
+            end_time = time.time()
+            print(f"get motif: {end_time - start_time} s")
+
+        if is_test:
+            start_time = time.time()
         ##################################
         # annotate single motif
         ##################################
@@ -265,20 +289,16 @@ if __name__ == "__main__":
             results = pool.imap_unordered(single_motif_annotation, tasks)
             pool.close()
             pool.join()
-            results = list(results)
-        
-        # merge single motif annotation
-        merged_list = []
-        for pid, _, result in results:
-            df = result.annotation
-            df[['start', 'end']] += (pid - 1) * step_size
-            merged_list.append(df)
-
-        merged_df = pd.concat(merged_list, ignore_index=True)
-        merged_df = merged_df.drop_duplicates().sort_values(by='end').reset_index(drop=True)
-        
+                   
         del results
         
+        if is_test:
+            end_time = time.time()
+            print(f"annotate motif: {end_time - start_time} s")
+
+        if is_test:
+            start_time = time.time()
+
         ##################################
         # DP to link
         ##################################
@@ -292,30 +312,40 @@ if __name__ == "__main__":
         dp = np.zeros(length + 1, dtype=np.float64)
         pre = np.full((length + 1, 3), None)  # (pre_i, motif_id, motif)
 
-        # Preprocess merged_df into numpy arrays for faster access
-        merged_start = merged_df['start'].values
-        merged_end = merged_df['end'].values
-        merged_motif = merged_df['motif'].values
-        merged_distance = merged_df['distance'].values
-
         idx = 0
+        df = pd.read_csv(f'{args.output}_temp/seg_anno_1.csv')
+        anno_start = df['start'].values
+        anno_end = df['end'].values
+        anno_motif = df['motif'].values
+        anno_distance = df['distance'].values
 
         # Dynamic programming loop
         for i in range(1, length + 1):
+            # read annotation data
+            if (i - overlap_size) % step_size == 0 and i > overlap_size:
+                pid = (i - overlap_size) // step_size
+                ### print(i)
+                ### print(f'pid:{pid}')
+                df = pd.read_csv(f'{args.output}_temp/seg_anno_{pid}.csv')
+                anno_start = df['start'].values
+                anno_end = df['end'].values
+                anno_motif = df['motif'].values
+                anno_distance = df['distance'].values
+
             # Skip one base
             if dp[i-1] - gap_penalty > 0:
                 dp[i] = dp[i-1] - gap_penalty
                 pre[i] = (i-1, None, None)
 
             # Efficiently iterate over merged_df without repeating checks
-            while idx < len(merged_df) and merged_end[idx] <= i:
-                if merged_end[idx] < i:
+            while idx < df.shape[0] and anno_end[idx] <= i:
+                if anno_end[idx] < i:
                     idx += 1
                     continue
 
-                pre_i = merged_start[idx]
-                motif = merged_motif[idx]
-                distance = merged_distance[idx]
+                pre_i = anno_start[idx]
+                motif = anno_motif[idx]
+                distance = anno_distance[idx]
                 bonus = perfect_bonus * len(motif) if distance == 0 else 0
 
                 score = dp[pre_i] + len(motif) - distance * distance_penalty + bonus
@@ -340,7 +370,7 @@ if __name__ == "__main__":
             if pre[idx][0] is not None:
                 if pre[idx][1] is not None:  # matched a motif
                     next_coords[pre[idx][0]] = idx
-                    next_motif[pre[idx][0]] = merged_motif[pre[idx][1]]
+                    next_motif[pre[idx][0]] = pre[idx][2]
                     idx = pre[idx][0]
                 else:  # skipped a base
                     next_coords[idx - 1] = idx
@@ -350,6 +380,10 @@ if __name__ == "__main__":
                 idx -= 1
   
         print('Retrace Complete!')
+
+        if is_test:
+            end_time = time.time()
+            print(f"DP and retrace: {end_time - start_time} s")
 
         # output motif annotation file
         annotation_data = []

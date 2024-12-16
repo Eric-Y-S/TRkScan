@@ -1,8 +1,12 @@
 library(shiny)
+library(stringr)
+library(dplyr)
+library(future)
+library(promises)
+# plot package
 library(ggplot2)
 library(igraph)
 library(visNetwork)
-library(stringr)
 
 setwd("D:/MyFile/git_repo/TRkScan/testData/")
 
@@ -19,7 +23,6 @@ ui <- fluidPage(
       font-size: 30px;
       font-weight: bold;
       height: 80px;
-      /* background: lightgrey; */
       margin-bottom: 20px;
     }
     .title p {
@@ -75,9 +78,9 @@ ui <- fluidPage(
            # uiOutput("region_to_show_ui"),
            # sliderInput("region to show", "Range", value = c(10, 20), min = 0, max = 100),
            selectInput( 
-             "select", 
+             "color", 
              "Color Palette", 
-             list("Choice 1A" = "1A", "Choice 1B" = "1B") 
+             list("contrast color palette" = "contrast", "rainbow" = "rainbow") 
            )
     )
   ),
@@ -141,13 +144,15 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
 
+  contrast <- c("#D00000","#3185FC","#FFBA08","#5D2E8C","#8FE388","#FF9B85","#8c5c2b","#696663") # 7 colors
+  rainbow <- c()
   ###################################################
   # get data 
   ###################################################
   # all data information
   uploaded_data <- reactive({
     req(input$upload)
-    uploaded_data <- input$upload
+    input$upload
   })
 
   output$files <- renderTable({
@@ -158,7 +163,7 @@ server <- function(input, output, session) {
   output$test <- renderTable({
     req(dist_rc())
     dist_rc()
-    
+    ### head(dist_rc(), n = 3)
   })
 
   # concise.tsv
@@ -166,6 +171,7 @@ server <- function(input, output, session) {
     req(uploaded_data())
     filename <- uploaded_data()[grepl(".concise.tsv",uploaded_data()$name),][1,"datapath"]
     read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+    # print("concise done")
   })
   
   # annotation.tsv
@@ -180,13 +186,9 @@ server <- function(input, output, session) {
     req(uploaded_data())
     filename <- uploaded_data()[grepl(".motif.tsv",uploaded_data()$name),][1,"datapath"]
     read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+    # print("concise done")
   })
 
-  # motif2id
-  motif2id <- reactive({
-    req(motif())
-
-  })
   
   # distance (not rc)
   dist <- reactive({
@@ -210,11 +212,11 @@ server <- function(input, output, session) {
     result$rc = FALSE
     result
   })
-  
+
   # distance (rc)
   dist_rc <- reactive({
     req(motif())
-    
+
     tmp = motif()
     motif_list = tmp$motif
     # tmp = tmp[motif_list]
@@ -254,16 +256,16 @@ server <- function(input, output, session) {
   ###################################################
   # global parameters
   ###################################################
-  # output$region_to_show_ui <- renderUI({
-  #   req(ncol(concise) > 0)  # ensure file has data
-  #   
-  #   column_data <- motif[[1]]
-  #   
-  #   sliderInput("slider", "选择值", 
-  #               min = min(column_data, na.rm = TRUE), 
-  #               max = max(column_data, na.rm = TRUE), 
-  #               value = c(min(column_data, na.rm = TRUE), max(column_data, na.rm = TRUE)))
-  # })
+  output$region_to_show_ui <- renderUI({
+    req(ncol(concise) > 0)  # ensure file has data
+
+    column_data <- motif[[1]]
+
+    sliderInput("slider", "选择值",
+                min = min(column_data, na.rm = TRUE),
+                max = max(column_data, na.rm = TRUE),
+                value = c(min(column_data, na.rm = TRUE), max(column_data, na.rm = TRUE)))
+  })
   
   ###################################################
   # MODULE 1: motif count and cluster
@@ -279,36 +281,26 @@ server <- function(input, output, session) {
                 step = 1)
   })
   
-  motif_cluster <- reactive({
+  graph_data <- reactive({
     req(motif())
-    req(input$num_of_motifs)
-    
-  })
-  
-  nodes <- reactive({
-    req(motif())
-    motif_list <- unique(motif()$motif)
-    data.frame(id = 1:length(motif_list), label = motif()$motif, value = motif()$rep_num)
-  })
-  
-  edges <- reactive({
-    req(motif())
-    
-    motif_list <- unique(motif()$motif)
-    tmp_edges <- data.frame(from = integer(0), to = integer(0), value = integer(0))
 
+    motif_list <- unique(motif()$motif)
+
+    # 创建空图并添加顶点
+    g <- make_empty_graph(directed = FALSE)
+    g <- add_vertices(g, length(motif_list), name = motif_list)
+
+    # 计算距离矩阵
     if(input$merge_rc){
-      distance_df <- rbind(dist(),dist_rc())
-    }else{
+      distance_df <- rbind(dist(), dist_rc())
+    } else {
       distance_df <- dist()
     }
     distance_df <- distance_df[order(distance_df$distance), ]
-    
-    # create a empty graph
-    g <- make_empty_graph(directed = FALSE)
-    g <- add_vertices(g, length(motif_list), name = motif_list)
-    
-    # add edge in cycle，until number of cluster = X
+
+    tmp_edges <- data.frame(from = integer(0), to = integer(0), value = integer(0))
+
+    # 添加边并计算连通分量
     num_components <- components(g)$no
     if(num_components > input$num_of_motifs) {
       for(i in 1:nrow(distance_df)) {
@@ -316,25 +308,72 @@ server <- function(input, output, session) {
         motif2 <- distance_df$motif2[i]
         from_id <- which(motif_list == motif1)
         to_id <- which(motif_list == motif2)
-        
-        tmp_edges <- rbind(tmp_edges, data.frame(from = from_id, to = to_id, 
-                                                 value = min(length(motif1),length(motif2)) - distance_df$distance[i], 
+
+        tmp_edges <- rbind(tmp_edges, data.frame(from = from_id, to = to_id,
+                                                 value = min(length(motif1), length(motif2)) - distance_df$distance[i],
                                                  label = as.character(distance_df$distance[i]),
                                                  dashes = distance_df$rc[i]))
         g <- add_edges(g, c(from_id, to_id))
+
         num_components <- components(g)$no
         if(num_components <= input$num_of_motifs) {
           break
         }
       }
     }
-    tmp_edges
+
+
+    # 返回图和边的数据
+    list(graph = g, edges = tmp_edges, motif_list = motif_list, distance_df = distance_df)
   })
-  
+
+  nodes <- reactive({
+    req(graph_data())  # 使用共享的 graph_data
+
+    if(input$color == 'contrast'){
+      color_list = contrast
+    }else{
+      color_list = rainbow
+    }
+
+    g <- graph_data()$graph
+    motif_list <- graph_data()$motif_list
+    motif_rep_num <- motif()$rep_num
+
+    # 获取连通分量和计算每个子图的权重总和
+    comp <- components(g)
+    print("#######")
+    ### print(comp)
+    component_sizes <- sapply(unique(comp$membership), function(x) sum(motif_rep_num[comp$membership == x]) )
+    tmp <- data.frame( total_rep_num = component_sizes, old_cluster_id = unique(comp$membership))
+    tmp = tmp[order(tmp$total_rep_num, decreasing = TRUE),]
+    tmp$new_cluster_id = 1:nrow(tmp)
+    print(tmp)
+
+    old_cluster_id <- data.frame(old_cluster_id  = comp$membership)
+    code_color_id <- old_cluster_id %>%
+      left_join(tmp, by = "old_cluster_id") %>%
+      mutate(color_id = ifelse(new_cluster_id < length(color_list), new_cluster_id, length(color_list))) %>%
+      pull(color_id)
+    print(code_color_id)
+
+    # 生成排序后的节点信息
+    data.frame(id = 1:length(motif_list),
+               label = motif_list,
+               value = motif_rep_num,
+               color = color_list[code_color_id])
+
+  })
+
+  edges <- reactive({
+    req(graph_data())  # 使用共享的 graph_data
+    graph_data()$edges
+  })
+
   output$network <- renderVisNetwork({
     req(motif())
     motif_list <- unique(motif()$motif)
-    
+
 
     visNetwork(nodes(), edges(), directed = FALSE)
   })

@@ -60,39 +60,42 @@ def find_similar_match(seq:str, motifs:list, max_distances:list):
     lcp = pydivsufsort.kasai(seq_bytes, sa)
 
     motif_match_list = []
-
-    motif_positions = defaultdict(list)
+    motif_positions = list()
 
     for motif_id, motif in enumerate(motifs):
         max_distance = max_distances[motif_id]
-        
+        motif_len = len(motif)
+
         idx = 0
         while idx < len(sa):
             s = seq[sa[idx]:]
-            matches = edlib.align(motif, s, mode="SHW", task="path", k=max_distance)
+            matches = edlib.align(motif, s, mode="SHW", task="locations", k = max_distance)
 
-            if matches['editDistance'] != -1:
+            if matches['editDistance'] == -1:   # not match
+                idx2 = idx
+                while idx2 < len(lcp) and lcp[idx2] >= motif_len + max_distance:
+                    idx2 += 1
+                idx = idx2 + 1
+                continue
+
+            for start, end in matches['locations']:
+                motif_positions.append(
+                    (start + sa[idx], end + 1 + sa[idx], motif, s[start:end + 1], matches['editDistance'])
+                )
+            
+            max_match_len = max(end + 1 for _, end in matches['locations'])
+
+            idx2 = idx
+            while idx2 < len(lcp) and lcp[idx2] >= max_match_len:
                 for start, end in matches['locations']:
-                    motif_positions[motif].append((start + sa[idx], end + 1 + sa[idx], motif, s[start:end + 1], matches['editDistance']))
-                
-                max_match_len = max(end + 1 for start, end in matches['locations'])
+                    motif_positions.append(
+                        (start + sa[idx2 + 1], end + 1 + sa[idx2 + 1], motif, s[start:end + 1], matches['editDistance'])
+                    )
+                idx2 += 1
 
-                for idx2 in range(idx, len(lcp)):
-                    if lcp[idx2] >= max_match_len:
-                        for start, end in matches['locations']:
-                            motif_positions[motif].append((start + sa[idx2+1], end + 1 + sa[idx2+1], motif, s[start:end + 1], matches['editDistance']))
-                    else:
-                        break
+            idx = idx2 + 1
 
-                idx = max(idx, idx2) + 1
-            else:
-                idx += 1
-
-    for motif, matches in motif_positions.items():
-        for match in matches:
-            motif_match_list.append(match)
-
-    motif_match_df = pd.DataFrame(motif_match_list, columns=['start', 'end', 'motif', 'seq', 'distance'])
+    motif_match_df = pd.DataFrame(motif_positions, columns=['start', 'end', 'motif', 'seq', 'distance'])
     motif_match_df = motif_match_df.sort_values(by=['start']).reset_index(drop=True)
 
     return motif_match_df
@@ -127,53 +130,41 @@ class Decompose:
             for k in self.kmer:
                 dbg.add_edge(k[:-1], k[1:], weight = self.kmer[k])
 
-            if(IS_PAINT):
+            if IS_PAINT:
                 pos = calculate_circular_layout(dbg)
-                ### print(pos)
-                paint_dbg(dbg, pos, 'test.pdf')
+                paint_dbg(dbg, pos, 'initial_graph.pdf')
             
-            #
             # make compact De Bruijn graph
-            #
             nodes_to_merge = [n for n in dbg.nodes() if dbg.in_degree(n) == 1 and dbg.out_degree(n) == 1] 
 
             cot = 1
-            ### print(nodes_to_merge)
             for node in nodes_to_merge:
-                if not node in dbg.nodes():
+                if node not in dbg.nodes():
                     continue
 
-                start = node
+                # find the start
                 added_nodes = [node]
-
-                pre = list(dbg.predecessors(start))[0]
+                pre = list(dbg.predecessors(node))[0]
                 while dbg.in_degree(pre) == 1 and dbg.out_degree(pre) == 1 and not pre in added_nodes:
                     added_nodes.append(pre)
-                    start = pre
-                    pre = list(dbg.predecessors(start))[0]
-                end = node
-                next = list(dbg.successors(end))[0]
+                    pre = list(dbg.predecessors(pre))[0]
+                
+                added_nodes = added_nodes[::-1]
+
+                # find the end
+                next = list(dbg.successors(node))[0]
                 while dbg.in_degree(next) == 1 and dbg.out_degree(next) == 1 and not next in added_nodes:
                     added_nodes.append(next)
-                    end = next
-                    next = list(dbg.successors(end))[0]
+                    next = list(dbg.successors(next))[0]
 
-                if start == end:
+                if len(added_nodes) == 1:    # Simple loop; no merging
                     continue
                 
+                merged_node = added_nodes[0] + ''.join(node[-1] for node in added_nodes[1:])
+                start = added_nodes[0]
+                end = added_nodes[-1]
                 predecessors = list(dbg.predecessors(start))
                 successors = list(dbg.successors(end))
-
-                nodes_to_del = [start]
-                cur = merged_node = start
-                while list(dbg.successors(cur))[0] != end:
-                    cur = list(dbg.successors(cur))[0]
-                    merged_node += cur[-1]
-                    nodes_to_del.append(cur)
-                merged_node += end[-1]
-                nodes_to_del.append(end)
-
-                ### print(nodes_to_del) 
 
                 if dbg.has_edge(end, start): # just a simple loop
                     dbg.add_edge(merged_node, merged_node, weight = dbg[end][start]['weight'])
@@ -184,14 +175,13 @@ class Decompose:
                         dbg.add_edge(merged_node, successor, weight = dbg[end][successor]['weight'])
                 
                 # delete original node
-                dbg.remove_nodes_from(nodes_to_del)
+                dbg.remove_nodes_from(added_nodes)
 
                 if(IS_PAINT):
                     pos[merged_node] = pos[start]
-                    for n in nodes_to_del:
+                    for n in added_nodes:
                         pos.pop(n, None)
-                    ### print(pos)
-                    paint_dbg(dbg, pos, f'test-step{cot}.pdf')
+                    paint_dbg(dbg, pos, f'compacted-step{cot}.pdf')
 
                 cot += 1
 
@@ -202,31 +192,24 @@ class Decompose:
     def find_motif(self):
         if self.motifs is None:
             cycles = nx.simple_cycles(self.dbg)
-            motifs = pd.DataFrame(columns=['cycle', 'motif', 'value'])
+            motifs = []
             for cycle in cycles:
-                motif = ''
-                for node in cycle:
-                    motif += node[(self.ksize - 1) : ]
-                # calculate counts
-                cot = []
-                cycle.append(cycle[0])
-                for i in range(len(cycle)-1):
-                    cot.append(self.dbg[cycle[i]][cycle[i+1]]['weight'])
+                motif = ''.join([node[(self.ksize - 1):] for node in cycle])
+                cot = [self.dbg[cycle[i]][cycle[i+1]]['weight'] for i in range(len(cycle) - 1)]
+                cot.append(self.dbg[cycle[-1]][cycle[0]]['weight'])  # add the weight of the last edge
 
-                motifs.loc[motifs.shape[0]] = [cycle, motif, min(cot)]
-            motifs = motifs.sort_values(by=['value'], ascending = False)
-            motifs = motifs.reset_index(drop=True)
-            self.motifs = motifs
-            self.motifs_list = motifs['motif'].to_list()
-            ### print(motifs)
+                motifs.append([cycle, motif, min(cot)])
+            motifs_df = pd.DataFrame(motifs, columns=['cycle', 'motif', 'value'])
+            motifs_df = motifs_df.sort_values(by=['value'], ascending = False).reset_index(drop=True)
+            self.motifs = motifs_df
+            self.motifs_list = motifs_df['motif'].to_list()
         return self.motifs
 
     def annotate_with_motif(self):
         if self.annotation is None:
             motifs = self.motifs_list
-            ### print(motifs)
 
-            max_distances = [ int( len(motif) * self.dist_ratio ) for motif in motifs]
+            max_distances = [ int( len(motif) * self.dist_ratio ) for motif in motifs ]
             motif_match_df = find_similar_match(self.sequecne, motifs, max_distances)
     
             self.annotation = motif_match_df
