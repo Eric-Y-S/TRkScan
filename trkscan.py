@@ -241,22 +241,28 @@ if __name__ == "__main__":
         ##################################
         # merge and decide the representive of motifs
         ##################################
-        motifs, nondup = [], []
+        motifs, motifs_rep, nondup, nondup_rep = [], [], [], []
         for pid, _, result in results:
             motifs.extend(result.motifs['motif'].to_list())
+            motifs_rep.extend(result.motifs['value'].to_list())
         for idx in range(len(motifs)):
             is_dup = False
-            for motif in nondup:
+            for idx2, motif in enumerate(nondup):
                 if rolling_same(motifs[idx], motif):
                     is_dup = True
+                    same_idx= idx2
                     break
             if not is_dup:
                 nondup.append(motifs[idx])
+                nondup_rep.append(motifs_rep[idx])
+            else:
+                motifs_rep[same_idx] += motifs_rep[idx]
 
         print(f'Number of identified motif = {len(nondup)}')
 
         with open(f'{args.output}_motif.txt','w') as fo:
-            fo.write('\n'.join(nondup))
+            for idx in range(len(nondup)):
+                fo.write(f'{nondup[idx]}\t{nondup_rep[idx]}\n')
 
         for pid, _, result in results:
             result.motifs_list = nondup
