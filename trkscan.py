@@ -253,7 +253,10 @@ if __name__ == "__main__":
             if not is_dup:
                 nondup.append(motifs[idx])
 
-        print(f'Number of identified mottif = {len(nondup)}')
+        print(f'Number of identified motif = {len(nondup)}')
+
+        with open(f'{args.output}_motif.txt','w') as fo:
+            fo.write('\n'.join(nondup))
 
         for pid, _, result in results:
             result.motifs_list = nondup
