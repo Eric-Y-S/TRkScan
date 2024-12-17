@@ -75,8 +75,6 @@ ui <- fluidPage(
           fileInput("upload", NULL, buttonLabel = "Upload...", multiple = TRUE),
     ),
     column(6, 
-           # uiOutput("region_to_show_ui"),
-           # sliderInput("region to show", "Range", value = c(10, 20), min = 0, max = 100),
            selectInput( 
              "color", 
              "Color Palette", 
@@ -116,6 +114,7 @@ ui <- fluidPage(
   
   fluidRow(    
     column(4, 
+       uiOutput("region_to_show_ui"),
        selectInput( 
          "x-axis", 
          "X-axis unit", 
@@ -146,6 +145,7 @@ server <- function(input, output, session) {
 
   contrast <- c("#D00000","#3185FC","#FFBA08","#5D2E8C","#8FE388","#FF9B85","#8c5c2b","#696663") # 7 colors
   rainbow <- c()
+  edge_scaling_factor <- 1
   ###################################################
   # get data 
   ###################################################
@@ -185,61 +185,44 @@ server <- function(input, output, session) {
   motif <- reactive({
     req(uploaded_data())
     filename <- uploaded_data()[grepl(".motif.tsv",uploaded_data()$name),][1,"datapath"]
-    read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
-    # print("concise done")
+    tmp = read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+    tmp$id <- as.integer(tmp$id)
+    tmp
   })
 
   # dist.tsv
   dist <- reactive({
     req(uploaded_data())
     filename <- uploaded_data()[grepl(".dist.tsv",uploaded_data()$name),][1,"datapath"]
-    read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
-    # print("concise done")
+    tmp = read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+    tmp$ref <- as.integer(tmp$ref)
+    tmp$query <- as.integer(tmp$query)
+    transfer = c('True' = TRUE, 'False' = FALSE)
+    tmp$is_rc = transfer[tmp$is_rc]
+    tmp
+  })
+  
+  id2motif <- reactive({
+    req(motif())
+    setNames(motif()$motif ,motif()$id)
   })
   
   motif2id <- reactive({
     req(motif())
-    tmp = setNames(motif()$id, motif()$motif)
-    print(tmp)
-    tmp
+    setNames(motif()$id, motif()$motif)
   })
-  #########################
-  output$file_preview <- renderText({
-    tmp = uploaded_data()
-    tmp = tmp[grepl(".concise.tsv",tmp$name),]
-    filename = tmp[1,"name"]
-    
-    concise_tsv <- reactive({
-      read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
-    })
-    
-    paste("You are reading:",filename)
-    
-    # df = read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
-    # df
-  })
-  
   
   ###################################################
   # global parameters
   ###################################################
-  output$region_to_show_ui <- renderUI({
-    req(ncol(concise) > 0)  # ensure file has data
 
-    column_data <- motif[[1]]
-
-    sliderInput("slider", "选择值",
-                min = min(column_data, na.rm = TRUE),
-                max = max(column_data, na.rm = TRUE),
-                value = c(min(column_data, na.rm = TRUE), max(column_data, na.rm = TRUE)))
-  })
   
   ###################################################
   # MODULE 1: motif count and cluster
   ###################################################
   output$num_of_motif_ui <- renderUI({
     req(motif())
-    max_num <- length(unique(motif()$motif))
+    max_num <- length(motif()$motif)
 
     sliderInput("num_of_motifs", "Number of motifs",
                 min = 1,
@@ -250,37 +233,32 @@ server <- function(input, output, session) {
   
   graph_data <- reactive({
     req(motif())
+    req(dist())
 
-    motif_list <- unique(motif()$motif)
-
-    # 创建空图并添加顶点
+    # create empty graph and add nodes
     g <- make_empty_graph(directed = FALSE)
-    g <- add_vertices(g, length(motif_list), name = motif_list)
-
-    # 计算距离矩阵
-    if(input$merge_rc){
-      distance_df <- rbind(dist(), dist_rc())
-    } else {
-      distance_df <- dist()
+    g <- add_vertices(g, nrow(motif()), name = motif()$id)
+    ### print(typeof(motif()$id))
+    # get distance data
+    distance_df <- dist()
+    if(! input$merge_rc){
+      distance_df <- distance_df[! distance_df$is_rc,]
     }
-    distance_df <- distance_df[order(distance_df$distance), ]
 
+    # add edges and calculate connected components
     tmp_edges <- data.frame(from = integer(0), to = integer(0), value = integer(0))
-
-    # 添加边并计算连通分量
     num_components <- components(g)$no
     if(num_components > input$num_of_motifs) {
       for(i in 1:nrow(distance_df)) {
-        motif1 <- distance_df$motif1[i]
-        motif2 <- distance_df$motif2[i]
-        from_id <- which(motif_list == motif1)
-        to_id <- which(motif_list == motif2)
+        id1 <- distance_df$ref[i]
+        id2 <- distance_df$query[i]
 
-        tmp_edges <- rbind(tmp_edges, data.frame(from = from_id, to = to_id,
-                                                 value = min(length(motif1), length(motif2)) - distance_df$distance[i],
-                                                 label = as.character(distance_df$distance[i]),
-                                                 dashes = distance_df$rc[i]))
-        g <- add_edges(g, c(from_id, to_id))
+        tmp_edges <- rbind(tmp_edges, data.frame(from = id1, to = id2,
+                                                 value = pmax(edge_scaling_factor / distance_df$dist[i], 0.1),
+                                                 label = as.character(distance_df$dist[i]),
+                                                 dashes = distance_df$is_rc[i]))
+        ### print(c(id1,id2))
+        g <- add_edges(g, c(id1 + 1, id2 + 1))
 
         num_components <- components(g)$no
         if(num_components <= input$num_of_motifs) {
@@ -290,12 +268,12 @@ server <- function(input, output, session) {
     }
 
 
-    # 返回图和边的数据
-    list(graph = g, edges = tmp_edges, motif_list = motif_list, distance_df = distance_df)
+    # return data
+    list(graph = g, edges = tmp_edges, distance_df = distance_df)
   })
 
   nodes <- reactive({
-    req(graph_data())  # 使用共享的 graph_data
+    req(graph_data())  # use shared graph_data
 
     if(input$color == 'contrast'){
       color_list = contrast
@@ -304,30 +282,26 @@ server <- function(input, output, session) {
     }
 
     g <- graph_data()$graph
-    motif_list <- graph_data()$motif_list
     motif_rep_num <- motif()$rep_num
 
-    # 获取连通分量和计算每个子图的权重总和
+    # get connected components and calculate the sum weight of each sub graph
     comp <- components(g)
-    print("#######")
-    ### print(comp)
     component_sizes <- sapply(unique(comp$membership), function(x) sum(motif_rep_num[comp$membership == x]) )
     tmp <- data.frame( total_rep_num = component_sizes, old_cluster_id = unique(comp$membership))
     tmp = tmp[order(tmp$total_rep_num, decreasing = TRUE),]
     tmp$new_cluster_id = 1:nrow(tmp)
-    print(tmp)
 
     old_cluster_id <- data.frame(old_cluster_id  = comp$membership)
     code_color_id <- old_cluster_id %>%
       left_join(tmp, by = "old_cluster_id") %>%
       mutate(color_id = ifelse(new_cluster_id < length(color_list), new_cluster_id, length(color_list))) %>%
       pull(color_id)
-    print(code_color_id)
+    ### print(code_color_id)
 
     # 生成排序后的节点信息
-    data.frame(id = 1:length(motif_list),
-               label = motif_list,
-               value = motif_rep_num,
+    data.frame(id = motif()$id,
+               label = motif()$motif,
+               value = motif()$rep_num,
                color = color_list[code_color_id])
 
   })
@@ -338,27 +312,177 @@ server <- function(input, output, session) {
   })
 
   output$network <- renderVisNetwork({
-    req(motif())
-    motif_list <- unique(motif()$motif)
-
-
+    req(nodes())
+    req(edges())
     visNetwork(nodes(), edges(), directed = FALSE)
   })
   
   ###################################################
   # MODULE 2: motif annotation
   ###################################################
+  output$region_to_show_ui <- renderUI({
+    req(concise())  # ensure file has data
+    
+    length <- concise()[1,'length']
+    
+    sliderInput("rgn2show", "region to show",
+                min = 0,
+                max = length,
+                value = c(0, length),
+                step = 1)
+  })
   
+  split_cigar <- function(seq, length, start, end, motif, cigar) {
+    segment_data <- data.frame()
+    
+    new_start = start
+    cur = new_start
+    cigar_str = ''
+    num_str = ''
+    # print(length(cigar))
+    for (i in 1:nchar(cigar)){
+      symbol = substring(cigar, i, i)
+      # print(symbol)
+      if (symbol %in% c('=','X','I') ){
+        ### print("#############33")
+        cur = cur + as.integer(num_str)
+        cigar_str =  paste0(cigar_str, num_str, symbol)
+        num_str = ''
+      } else if (symbol == 'D'){
+        cigar_str =  paste0(cigar_str, num_str, symbol)
+        num_str = ''
+      } else if (symbol == 'N'){
+        segment_data <- rbind(segment_data, data.frame(
+          seq = seq,
+          length = length,
+          start = new_start,
+          end = cur,
+          motif = motif,  
+          CIGAR = cigar_str
+        ))
+        new_start = cur + as.integer(num_str)
+        cur = new_start
+        cigar_str = ''
+        num_str = ''
+      } else if (symbol == '/'){
+        cigar_str = paste0(cigar_str, '/')
+      } else {
+        num_str = paste0(num_str, symbol)
+      }
+    }
+    if (length(cigar_str) > 0){
+      segment_data <- rbind(segment_data, data.frame(
+        seq = seq,
+        length = length,
+        start = new_start,
+        end = cur,
+        motif = motif,  
+        CIGAR = cigar_str
+      ))
+    }
+    return(segment_data)
+  }
   
-  # output$motif_vis <- renderPlot({
-  #   seq(concise())
-  #   seq_list = concise()$seq
-  #   
-  #   ggplot() + 
-  #     geom_tile() +
-  #     geom_text(aes(label = seq_list), data = 1:length(seq_list)) +
-  #     theme_classic()
-  # })
+  base_pair_concise_annotation <- reactive({
+    seq(concise())
+    seq(nodes())
+    
+    df = concise()
+    # split with N character
+    new_df <- data.frame()
+    for (i in 1:nrow(df)) {
+      seq <- df$seq[i]
+      length <- df$length[i]
+      start <- df$start[i]
+      end <- df$end[i]
+      motif <- df$motif[i]
+      cigar <- df$CIGAR[i]
+      # print(typeof(cigar))
+      # print(grepl("N", cigar))
+      if (grepl("N", cigar)) {
+        # print(typeof(start))
+        # print(typeof(end))
+        # print(typeof(cigar))
+        split_result <- split_cigar(seq, length, start, end, motif, cigar)
+        # print(split_result)
+        new_df <- rbind(new_df, split_result)
+      } else {
+        new_df <- rbind(new_df, df[i, c('seq','length','start','end','motif','CIGAR')])
+      }
+    }
+    
+    colormap = setNames(nodes()$color, nodes()$label)
+    new_df$color = colormap[new_df$motif]
+    
+    df = new_df
+    new_df = data.frame()
+    ### print(df)
+    for (i in 1:(nrow(df)-1)){
+      if (i == 1){
+        start = df[1,'start']
+        end = df[1,'end']
+      }
+      if (df[i,'color'] == df[i+1, 'color'] && df[i,'end'] == df[i+1,'start']){
+        end = df[i+1,'end']
+      } else {
+        new_df <- rbind(new_df, data.frame(
+          seq = df[i,'seq'],
+          length = df[i,'seq'],
+          start = start,
+          end = end,
+          color = df[i,'color']
+        ))
+        start = df[i+1,'start']
+        end = df[i+1,'end']
+      }
+    }
+    new_df <- rbind(new_df, data.frame(
+      seq = df[i,'seq'],
+      length = df[i,'seq'],
+      start = start,
+      end = end,
+      color = df[i,'color']
+    ))
+    
+    
+    # give y axis
+    seq_list = unique(new_df$seq)
+    seq2ymin = setNames(-1*(1:length(seq_list)),seq_list)
+    new_df$y_min = seq2ymin[new_df$seq]
+    new_df$y_max = new_df$y_min + 0.8
+    
+    new_df
+  })
+  
+  output$motif_vis <- renderPlot({
+    seq(base_pair_concise_annotation())
+    
+    seq_list = unique(base_pair_concise_annotation()$seq)
+    seq_pos = unique(base_pair_concise_annotation()$y_min) + 0.4
+    color_list = unique(base_pair_concise_annotation()$color)
+
+    if(input$"x-axis" == 'base-pair'){
+      data4plot = base_pair_concise_annotation()
+      # print(names(colormap))
+      # print(unique(data4plot$motif) %in% names(colormap) ) 
+      # print(colormap[unique(data4plot$motif)]) 
+      # print(tail(data4plot))
+      ggplot() +
+        #geom_rect(data = data4plot, aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max, fill = color)) +  
+        geom_tile(data = data4plot, aes(x = (start + end) / 2, y = (y_min + y_max) / 2, width = end - start, height = y_max - y_min, fill = color)) +
+        geom_text(aes(label = seq_list), x = rep(-1,length(seq_list)), y = seq_pos) +
+        theme_minimal() + 
+        ### labs(title = "Tandem Repeat Units", x = "Position", y = "") +
+        scale_fill_manual(values = setNames(color_list, color_list)) +
+        coord_cartesian(xlim = input$rgn2show, expand = TRUE) +
+        theme(axis.text.y = element_blank(),
+              legend.position = "none")  # 隐藏 y 轴标签
+    } else {
+      
+    }
+
+    
+  })
   
   
   ###################################################

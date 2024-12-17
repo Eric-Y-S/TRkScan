@@ -1,6 +1,5 @@
-import os
+import os, math
 import argparse
-import subprocess
 import pandas as pd
 import edlib
 from pybktree import BKTree
@@ -317,6 +316,7 @@ if __name__ == "__main__":
         pre = np.full((length + 1, 3), None)  # (pre_i, motif_id, motif)
 
         idx = 0
+        pid = 1
         df = pd.read_csv(f'{args.output}_temp/seg_anno_1.csv')
         anno_start = df['start'].values
         anno_end = df['end'].values
@@ -326,14 +326,15 @@ if __name__ == "__main__":
         # Dynamic programming loop
         for i in range(1, length + 1):
             # read annotation data
-            if (i - overlap_size) % step_size == 0 and i > overlap_size:
-                pid = (i - overlap_size) // step_size
+            if i > overlap_size + pid * step_size and i > overlap_size:
+                pid = math.ceil((i - overlap_size) / step_size) 
                 idx = 0
                 df = pd.read_csv(f'{args.output}_temp/seg_anno_{pid}.csv')
                 anno_start = df['start'].values
                 anno_end = df['end'].values
                 anno_motif = df['motif'].values
                 anno_distance = df['distance'].values
+                print(f'{i} read pid: {pid}')
 
             # Skip one base
             if dp[i-1] - gap_penalty > 0:
@@ -359,7 +360,7 @@ if __name__ == "__main__":
                 idx += 1
 
             # Print progress every 5000 iterations
-            if i % 5000 == 0:
+            if not args.silent and i % 5000 == 0:
                 print(f'DP: {i // 1000} kbp is Done!')
 
         print('DP complete!')
