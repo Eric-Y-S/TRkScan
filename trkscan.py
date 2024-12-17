@@ -223,7 +223,7 @@ if __name__ == "__main__":
         mask = [base != "N" for base in seq]
         filter_seq = ''.join(compress(seq, mask))
         seqLenwoN = len(filter_seq)
-        total_task = max(1, (seqLenwoN - overlap_size) // step_size )
+        total_task = max(1, (seqLenwoN - overlap_size) // step_size + 1)
 
         
         if is_test:
