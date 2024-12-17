@@ -258,6 +258,7 @@ if __name__ == "__main__":
                 nondup_rep.append(motifs_rep[idx])
             else:
                 motifs_rep[same_idx] += motifs_rep[idx]
+                print(f'{nondup[same_idx]} : {motifs_rep[same_idx]}')
 
         print(f'Number of identified motif = {len(nondup)}')
 
