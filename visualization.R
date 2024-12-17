@@ -161,8 +161,8 @@ server <- function(input, output, session) {
   })
   
   output$test <- renderTable({
-    req(dist_rc())
-    dist_rc()
+    req(dist())
+    head(dist())
     ### head(dist_rc(), n = 3)
   })
 
@@ -189,53 +189,20 @@ server <- function(input, output, session) {
     # print("concise done")
   })
 
-  
-  # distance (not rc)
+  # dist.tsv
   dist <- reactive({
-    req(motif())
-
-    tmp = motif()
-    motif_list = tmp$motif
-    # tmp = tmp[motif_list]
-    result <- data.frame(motif1 = character(0), motif2 = character(0), distance = integer(0))
-    for(i in 1:(length(motif_list) - 1)){
-      for(j in (i+1):length(motif_list)){
-        # print(i,j)
-        motif1 <- motif_list[i]
-        motif2 <- motif_list[j]
-        distance1 <- as.integer(str_extract(tmp[tmp$motif == motif1, motif2], "^\\d+"))
-        result <- rbind(result, data.frame(motif1 = motif1, motif2 = motif2, distance = distance1))
-      }
-    }
-    result = result[order(result$distance), ]
-    rownames(result) <- 1:nrow(result)
-    result$rc = FALSE
-    result
-  })
-
-  # distance (rc)
-  dist_rc <- reactive({
-    req(motif())
-
-    tmp = motif()
-    motif_list = tmp$motif
-    # tmp = tmp[motif_list]
-    result <- data.frame(motif1 = character(0), motif2 = character(0), distance = integer(0))
-    for(i in 1:(length(motif_list) - 1)){
-      for(j in (i+1):length(motif_list)){
-        # print(i,j)
-        motif1 <- motif_list[i]
-        motif2 <- motif_list[j]
-        distance1 <- as.integer(str_extract(tmp[tmp$motif == motif1, motif2], "(?<=,)(\\d+)"))
-        result <- rbind(result, data.frame(motif1 = motif1, motif2 = motif2, distance = distance1))
-      }
-    }
-    result = result[order(result$distance), ]
-    rownames(result) <- 1:nrow(result)
-    result$rc = TRUE
-    result
+    req(uploaded_data())
+    filename <- uploaded_data()[grepl(".dist.tsv",uploaded_data()$name),][1,"datapath"]
+    read.table(filename, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+    # print("concise done")
   })
   
+  motif2id <- reactive({
+    req(motif())
+    tmp = setNames(motif()$id, motif()$motif)
+    print(tmp)
+    tmp
+  })
   #########################
   output$file_preview <- renderText({
     tmp = uploaded_data()

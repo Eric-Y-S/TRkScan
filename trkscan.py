@@ -35,7 +35,8 @@ def find_N(task):
     
     N_coordinate_df = pd.DataFrame(N_coordinates, columns=['start', 'end'])
     N_coordinate_df[['start', 'end']] += (pid - 1) * window_size
-    print(f'Process N Complete: {pid}/{total_task}')
+    if not args.silent:
+        print(f'Process N Complete: {pid}/{total_task}')
 
     return N_coordinate_df
 
@@ -45,7 +46,8 @@ def decompose_sequence(task):
     seg.count_kmers()
     seg.build_dbg()
     seg.find_motif()
-    print(f'Decomposition Complete: {pid}/{total_task}')
+    if not args.silent:
+        print(f'Decomposition Complete: {pid}/{total_task}')
     return ( pid, total_task, seg )
 
 def single_motif_annotation(task):
@@ -55,7 +57,8 @@ def single_motif_annotation(task):
     df[['start', 'end']] += (pid - 1) * step_size
     df = df.sort_values(by='end').reset_index(drop=True)
     df.to_csv(f'{args.output}_temp/seg_anno_{pid}.csv', index = False)
-    print(f'Single Motif Annotation Complete: {pid}/{total_task}')
+    if not args.silent:
+        print(f'Single Motif Annotation Complete: {pid}/{total_task}')
 
 def rolling_same(seq1, seq2):
     if len(seq1) != len(seq2):
@@ -121,6 +124,7 @@ parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size
 parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.txt', help='reference motif set')  ###### need to add reference set
 parser.add_argument('-n', '--motifnum', type = int, default = 30, help='motif maximum')
 parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
+parser.add_argument('-s', '--silent', action='store_true', help="dont output the massive thread complete info to terminal if set TRUE")
 args = parser.parse_args()
 
 args.input = args.input.replace('\\','/')
@@ -257,7 +261,7 @@ if __name__ == "__main__":
                 nondup.append(motifs[idx])
                 nondup_rep.append(motifs_rep[idx])
             else:
-                motifs_rep[same_idx] += motifs_rep[idx]
+                nondup_rep[same_idx] += motifs_rep[idx]
                 print(f'{nondup[same_idx]} : {motifs_rep[same_idx]}')
 
         print(f'Number of identified motif = {len(nondup)}')
