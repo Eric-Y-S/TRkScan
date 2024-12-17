@@ -53,6 +53,10 @@ def paint_dbg(g, pos, filename):
 
     return 
 
+def rotate_strings(s):
+    n = len(s)
+    return [s[i:] + s[:i] for i in range(n)]
+
 def find_similar_match(seq:str, motifs:list, max_distances:list):
     
     seq_bytes = seq.encode('utf-8')
@@ -101,9 +105,10 @@ def find_similar_match(seq:str, motifs:list, max_distances:list):
     return motif_match_df
 
 class Decompose:
-    def __init__(self, sequence, ksize):
+    def __init__(self, sequence, ksize, tree):
         self.sequecne = sequence
         self.ksize = ksize
+        self.ref = tree
         self.abud_treshold = 0.01
         self.abud_min = 3
         self.dist_ratio = 0.4
@@ -195,10 +200,25 @@ class Decompose:
             motifs = []
             for cycle in cycles:
                 motif = ''.join([node[(self.ksize - 1):] for node in cycle])
+
+                min_distance = 1e6
+                best_motif = motif
+                sequences = rotate_strings(motif)  # 获取所有旋转的变体
+                max_distance = int(0.5 * len(motif))  # 设置最大允许的距离
+                for seq in sequences:
+                    ### print(f'############## 当前查询: {seq}')
+                    matches = self.ref.find(seq, max_distance)  # 查询匹配的motif
+                    ### print(matches)
+                    for dist, ref in matches:
+                        ### print(f'匹配: {ref} 距离: {dist}')
+                        if dist < min_distance:
+                            best_motif = seq
+                            min_distance = dist
+
                 cot = [self.dbg[cycle[i]][cycle[i+1]]['weight'] for i in range(len(cycle) - 1)]
                 cot.append(self.dbg[cycle[-1]][cycle[0]]['weight'])  # add the weight of the last edge
 
-                motifs.append([cycle, motif, min(cot)])
+                motifs.append([cycle, best_motif, min(cot)])
             motifs_df = pd.DataFrame(motifs, columns=['cycle', 'motif', 'value'])
             motifs_df = motifs_df.sort_values(by=['value'], ascending = False).reset_index(drop=True)
             self.motifs = motifs_df

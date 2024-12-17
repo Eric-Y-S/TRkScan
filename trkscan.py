@@ -40,8 +40,8 @@ def find_N(task):
     return N_coordinate_df
 
 def decompose_sequence(task):
-    pid, total_task, sequence, ksize = task
-    seg = Decompose(sequence, ksize)
+    pid, total_task, sequence, ksize, tree = task
+    seg = Decompose(sequence, ksize, tree)
     seg.count_kmers()
     seg.build_dbg()
     seg.find_motif()
@@ -71,8 +71,8 @@ def rc(seq):
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
     return ''.join(complement[base] for base in reversed(seq))
 
-def calculate_distance(ref, query_list):
-    min_dist_list = []
+def calculate_distance(ref, query_list, motif2id):
+    df_list = []
     for query in query_list:
         if len(ref) >= len(query):
             tmp_ref, tmp_query = query, ref
@@ -91,8 +91,9 @@ def calculate_distance(ref, query_list):
 
             matches_ref_rc = edlib.align(rolling_query, extended_ref_rc, mode="NW", task="distance")
             min_dist2 = min(min_dist2, matches_ref_rc['editDistance'])
-        min_dist_list.append(f'{min_dist1},{min_dist2}')
-    return min_dist_list
+        df_list.append([motif2id[tmp_ref], motif2id[tmp_query], min_dist1, False])
+        df_list.append([motif2id[tmp_ref], motif2id[tmp_query], min_dist2, True])
+    return df_list
 
 def rotate_strings(s):
     n = len(s)
@@ -217,7 +218,7 @@ if __name__ == "__main__":
         mask = [base != "N" for base in seq]
         filter_seq = ''.join(compress(seq, mask))
         seqLenwoN = len(filter_seq)
-        total_task = max(1, int((seqLenwoN - window_size) / step_size + 1) )
+        total_task = max(1, (seqLenwoN - overlap_size) // step_size )
 
         
         if is_test:
@@ -229,7 +230,7 @@ if __name__ == "__main__":
             cur = 0
             tasks = []
             while cur < total_task:
-                tasks.append(tuple([cur + 1, total_task, filter_seq[cur*step_size : cur*step_size + window_size], args.ksize]))
+                tasks.append(tuple([cur + 1, total_task, filter_seq[cur*step_size : cur*step_size + window_size], args.ksize, tree]))
                 cur += 1
             results = pool.imap_unordered(decompose_sequence, tasks)
             
@@ -252,27 +253,10 @@ if __name__ == "__main__":
             if not is_dup:
                 nondup.append(motifs[idx])
 
-        nondup_adjusted = []
-        for motif in nondup:
-            min_distance = 1e6
-            best_motif = motif
-            sequences = rotate_strings(motif)  # 获取所有旋转的变体
-            max_distance = int(0.5 * len(motif))  # 设置最大允许的距离
-            for seq in sequences:
-                ### print(f'############## 当前查询: {seq}')
-                matches = tree.find(seq, max_distance)  # 查询匹配的motif
-                ### print(matches)
-                for dist, ref  in matches:
-                    ### print(f'匹配: {ref} 距离: {dist}')
-                    if dist < min_distance:
-                        best_motif = seq
-                        min_distance = dist
-            nondup_adjusted.append(best_motif)
-
-        ### print(nondup_adjusted)
+        print(f'Number of identified mottif = {len(nondup)}')
 
         for pid, _, result in results:
-            result.motifs_list = nondup_adjusted
+            result.motifs_list = nondup
 
         if is_test:
             end_time = time.time()
@@ -324,8 +308,7 @@ if __name__ == "__main__":
             # read annotation data
             if (i - overlap_size) % step_size == 0 and i > overlap_size:
                 pid = (i - overlap_size) // step_size
-                ### print(i)
-                ### print(f'pid:{pid}')
+                idx = 0
                 df = pd.read_csv(f'{args.output}_temp/seg_anno_{pid}.csv')
                 anno_start = df['start'].values
                 anno_end = df['end'].values
@@ -541,18 +524,26 @@ if __name__ == "__main__":
     motif_group = merged_annotation.groupby('motif')['rep_num'].sum().reset_index()
     motif_df = motif_group[['motif', 'rep_num']].copy()
     motif_df = motif_df.sort_values(by=['rep_num'], ascending = False).reset_index(drop=True)
+    motif_df.index.name = 'id'
     motifs_list = motif_df['motif'].to_list()
-    ### print(motifs_list)
+    motif_df.to_csv(f'{args.output}.motif.tsv', sep = '\t', index = True)
+    ### print([row for row in motif_df.iterrows()])
+    motif2id = {row['motif'] : index for index, row in motif_df.iterrows()}
+    ### print(motif2id)
     
-    all_distances = []
+    ##################################
+    # make file - *.dist.tsv
+    ##################################
+    all_df_row = []
     for motif in motifs_list:
-        distances = calculate_distance(motif, motifs_list)
-        all_distances.append(distances)
+        all_df_row.extend(calculate_distance(motif, motifs_list, motif2id))
 
-    distance_df = pd.DataFrame(all_distances, columns = motifs_list)
-    motif_df = pd.concat([motif_df, distance_df], axis=1)
+    distance_df = pd.DataFrame(all_df_row, columns = ['ref','query','dist','is_rc'])
+    distance_df = distance_df[distance_df['ref'] != distance_df['query']]
+    distance_df = distance_df.sort_values(by=['dist']).reset_index(drop=True)
+    distance_df.to_csv(f'{args.output}.dist.tsv', sep = '\t', index = False)
 
-    motif_df.to_csv(f'{args.output}.motif.tsv', sep = '\t', index = False)
+   
 
 
 
