@@ -267,7 +267,7 @@ if __name__ == "__main__":
         tmp = tmp.sort_values(by=['motif_rep'], ascending = False).reset_index(drop=True)
         tmp.to_csv(f'{args.output}_motif.txt', sep='\t')
         tmp = tmp.head(args.motifnum)
-        nondup = tmp.motifs['motif'].to_list()
+        nondup = tmp['motif'].to_list()
 
         for pid, _, result in results:
             result.motifs_list = nondup
