@@ -260,9 +260,12 @@ if __name__ == "__main__":
 
         print(f'Number of identified motif = {len(nondup)}')
 
-        with open(f'{args.output}_motif.txt','w') as fo:
-            for idx in range(len(nondup)):
-                fo.write(f'{nondup[idx]}\t{nondup_rep[idx]}\n')
+        tmp = pd.DataFrame(columns=['motif','motif_rep'])
+        tmp['motif'] = nondup
+        tmp['motif_rep'] = nondup_rep
+        tmp = tmp.sort_values(by=['motif_rep']).reset_index(drop=True)
+        tmp.to_csv(f'{args.output}_motif.txt', sep='\t')
+
 
         for pid, _, result in results:
             result.motifs_list = nondup
