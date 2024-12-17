@@ -119,6 +119,7 @@ parser.add_argument('output', type = str, help = 'output prefix')
 parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
 parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
 parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.txt', help='reference motif set')  ###### need to add reference set
+parser.add_argument('-n', '--motifnum', type = int, default = 30, help='motif maximum')
 parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
 args = parser.parse_args()
 
@@ -263,9 +264,10 @@ if __name__ == "__main__":
         tmp = pd.DataFrame(columns=['motif','motif_rep'])
         tmp['motif'] = nondup
         tmp['motif_rep'] = nondup_rep
-        tmp = tmp.sort_values(by=['motif_rep']).reset_index(drop=True)
+        tmp = tmp.sort_values(by=['motif_rep'], ascending = False).reset_index(drop=True)
         tmp.to_csv(f'{args.output}_motif.txt', sep='\t')
-
+        tmp = tmp.head(args.motifnum)
+        nondup = tmp.motifs['motif'].to_list()
 
         for pid, _, result in results:
             result.motifs_list = nondup
