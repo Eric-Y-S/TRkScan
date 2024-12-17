@@ -22,7 +22,8 @@ def find_N(task):
     sequence = np.array(list(sequence))
     n_indices = np.where(sequence == 'N')[0]
     if len(n_indices) == 0:
-        print(f'Process N Complete: {pid}/{total_task}')
+        if not args.silent:
+            print(f'Process N Complete: {pid}/{total_task}')
         return pd.DataFrame(columns=['start', 'end'])
     
     for i in range(len(n_indices)):
