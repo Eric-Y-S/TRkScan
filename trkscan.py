@@ -248,8 +248,10 @@ if __name__ == "__main__":
         ##################################
         motifs, motifs_rep, nondup, nondup_rep = [], [], [], []
         for pid, _, result in results:
-            motifs.extend(result.motifs['motif'].to_list())
-            motifs_rep.extend(result.motifs['value'].to_list())
+            tmp = result.motifs['motif'].to_list()
+            tmp_length = min(args.motifnum, len(tmp))
+            motifs.extend(tmp[: tmp_length])
+            motifs_rep.extend(result.motifs['value'].to_list()[: tmp_length])
         for idx in range(len(motifs)):
             is_dup = False
             for idx2, motif in enumerate(nondup):
