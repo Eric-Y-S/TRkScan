@@ -262,7 +262,7 @@ if __name__ == "__main__":
                 nondup_rep.append(motifs_rep[idx])
             else:
                 nondup_rep[same_idx] += motifs_rep[idx]
-                print(f'{nondup[same_idx]} : {motifs_rep[same_idx]}')
+                ### print(f'{nondup[same_idx]} : {motifs_rep[same_idx]}')
 
         print(f'Number of identified motif = {len(nondup)}')
 
@@ -334,7 +334,7 @@ if __name__ == "__main__":
                 anno_end = df['end'].values
                 anno_motif = df['motif'].values
                 anno_distance = df['distance'].values
-                print(f'{i} read pid: {pid}')
+                ### print(f'{i} read pid: {pid}')
 
             # Skip one base
             if dp[i-1] - gap_penalty > 0:

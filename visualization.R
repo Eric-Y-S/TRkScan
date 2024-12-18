@@ -143,7 +143,7 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
 
-  contrast <- c("#D00000","#3185FC","#FFBA08","#5D2E8C","#8FE388","#FF9B85","#8c5c2b","#696663") # 7 colors
+  contrast <- c("lightgrey","#3185FC","#D00000","#FFBA08","#5D2E8C","#8FE388","#FF9B85","#8c5c2b","#696663") # 7 colors
   rainbow <- c()
   edge_scaling_factor <- 1
   ###################################################
