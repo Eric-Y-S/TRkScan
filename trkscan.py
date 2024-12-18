@@ -169,7 +169,7 @@ if __name__ == "__main__":
         ##################################
         # deal with N character          
         ##################################
-        seq = str(record.seq)
+        seq = str(record.seq.upper())
         seqLenwN = len(seq)
         total_task = max(1, (seqLenwN - window_size) // step_size + 1)
         
@@ -391,6 +391,9 @@ if __name__ == "__main__":
             end_time = time.time()
             print(f"DP and retrace: {end_time - start_time} s")
 
+        if is_test:
+            start_time = time.time()
+
         # output motif annotation file
         annotation_data = []
         idx = 0
@@ -497,6 +500,15 @@ if __name__ == "__main__":
     merged_annotation = pd.concat(annotation_list, ignore_index=True)
     merged_annotation.to_csv(f'{args.output}.concise.tsv', sep = '\t', index = False)
 
+    if is_test:
+        end_time = time.time()
+        print(f"make concise.tsv: {end_time - start_time} s")
+
+    print('output concise.tsv is done!')
+
+    if is_test:
+        start_time = time.time()
+
     ##################################
     # make file - *.annotation.tsv
     ##################################
@@ -539,6 +551,14 @@ if __name__ == "__main__":
     detailed_df = pd.DataFrame(data = detail_annotation, columns = ['seq','length','start','end','motif','actual_motif','CIGAR'])
     detailed_df.to_csv(f'{args.output}.annotation.tsv', sep = '\t', index = False)
 
+    if is_test:
+        end_time = time.time()
+        print(f"make annotation.tsv: {end_time - start_time} s")
+
+    print('output annotation.tsv is done!')
+
+    if is_test:
+        start_time = time.time()
 
     ##################################
     # make file - *.motif.tsv
@@ -554,6 +574,15 @@ if __name__ == "__main__":
     motif2id = {row['motif'] : index for index, row in motif_df.iterrows()}
     ### print(motif2id)
     
+    if is_test:
+        end_time = time.time()
+        print(f"make motif.tsv: {end_time - start_time} s")
+
+    print('output motif.tsv is done!')
+
+    if is_test:
+        start_time = time.time()
+
     ##################################
     # make file - *.dist.tsv
     ##################################
@@ -565,6 +594,12 @@ if __name__ == "__main__":
     distance_df = distance_df[distance_df['ref'] != distance_df['query']]
     distance_df = distance_df.sort_values(by=['dist']).reset_index(drop=True)
     distance_df.to_csv(f'{args.output}.dist.tsv', sep = '\t', index = False)
+
+    if is_test:
+        end_time = time.time()
+        print(f"make dist.tsv: {end_time - start_time} s")
+
+    print('output dist.tsv is done!')
 
    
 

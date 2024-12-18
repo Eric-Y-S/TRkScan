@@ -8,7 +8,9 @@ library(ggplot2)
 library(igraph)
 library(visNetwork)
 
-setwd("D:/MyFile/git_repo/TRkScan/testData/")
+setwd("D:/MyFile/git_repo/TRkScan/")
+source("./plotScripts/triangular_heatmap.R")
+
 
 ui <- fluidPage(
   
@@ -103,7 +105,8 @@ ui <- fluidPage(
       checkboxInput("merge_rc", "merge_rc", FALSE)
     ),
     column(8,
-      visNetworkOutput("network")
+      visNetworkOutput("network"),
+      plotOutput("legend")
     )
   ),
   
@@ -119,7 +122,8 @@ ui <- fluidPage(
          "x-axis", 
          "X-axis unit", 
          list("base pair" = "base-pair", "repetition number" = "rep-num") 
-       )
+       ),
+       checkboxInput("align", "align", FALSE)
     ),
     column(8, 
        plotOutput("motif_vis")
@@ -136,7 +140,7 @@ ui <- fluidPage(
            
     ),
     column(8, 
-           
+        plotOutput("id_heatmap")
     )
   ),
 )
@@ -414,6 +418,7 @@ server <- function(input, output, session) {
     colormap = setNames(nodes()$color, nodes()$label)
     new_df$color = colormap[new_df$motif]
     
+    # conbine same line
     df = new_df
     new_df = data.frame()
     ### print(df)
@@ -458,7 +463,7 @@ server <- function(input, output, session) {
     seq(base_pair_concise_annotation())
     
     seq_list = unique(base_pair_concise_annotation()$seq)
-    seq_pos = unique(base_pair_concise_annotation()$y_min) + 0.4
+    seq_pos = unique(base_pair_concise_annotation()$y_max) + 0.1
     color_list = unique(base_pair_concise_annotation()$color)
 
     if(input$"x-axis" == 'base-pair'){
@@ -469,14 +474,19 @@ server <- function(input, output, session) {
       # print(tail(data4plot))
       ggplot() +
         #geom_rect(data = data4plot, aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max, fill = color)) +  
-        geom_tile(data = data4plot, aes(x = (start + end) / 2, y = (y_min + y_max) / 2, width = end - start, height = y_max - y_min, fill = color)) +
-        geom_text(aes(label = seq_list), x = rep(-1,length(seq_list)), y = seq_pos) +
+        geom_tile(data = data4plot, aes(x = (start + end) / 2, y = seq, width = end - start, height = y_max - y_min, fill = color)) +
+        geom_text(aes(label = seq_list), x = rep(-1,length(seq_list)), y = seq_pos, size = 10, hjust = 0) +
         theme_minimal() + 
         ### labs(title = "Tandem Repeat Units", x = "Position", y = "") +
         scale_fill_manual(values = setNames(color_list, color_list)) +
-        coord_cartesian(xlim = input$rgn2show, expand = TRUE) +
-        theme(axis.text.y = element_blank(),
+        coord_cartesian(xlim = input$rgn2show, expand = FALSE) +
+        xlab('base pair (bp)') +
+        ylab('sequences') +
+        theme(axis.text.x = element_text(size = 14),
+              axis.text.y = element_text(size = 14, color = 'black', family = "Arial"),
+              axis.title = element_text(size = 20),
               legend.position = "none")  # 隐藏 y 轴标签
+      
     } else {
       
     }
@@ -488,7 +498,9 @@ server <- function(input, output, session) {
   ###################################################
   # MODULE 3: xxxxxxxxxxxxxxx
   ###################################################
-  
+  output$id_heatmap <- renderPlot({
+    
+  })
  
   
   
