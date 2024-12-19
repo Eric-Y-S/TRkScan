@@ -121,7 +121,7 @@ parser.add_argument('input', type = str, help = 'FASTA file you want to annotate
 parser.add_argument('output', type = str, help = 'output prefix')
 parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
 parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
-parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.txt', help='reference motif set')  ###### need to add reference set
+parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.fa', help='reference motif set')  ###### need to add reference set
 parser.add_argument('-n', '--motifnum', type = int, default = 30, help='motif maximum')
 parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
 parser.add_argument('-s', '--silent', action='store_true', help="dont output the massive thread complete info to terminal if set TRUE")
@@ -141,26 +141,31 @@ if __name__ == "__main__":
     if is_test:
         start_time = time.time()
     ##################################
-    # read data
+    # read data and reference motif set
     ##################################
     with open(args.input, "r") as handle:
-        records = list(SeqIO.parse(handle, "fasta"))
+        seq_records = list(SeqIO.parse(handle, "fasta"))
+    with open(args.motif, "r") as handle:
+        motif_records = list(SeqIO.parse(handle, "fasta"))
 
     ##################################
-    # read reference motif set
+    # add reference motif set into BK tree
     ##################################
+    ref_motif2name = dict()
     tree = BKTree(Levenshtein.distance)  # use Levenshtein distance
+    for record in motif_records:
+        motif_name = record.name
+        motif = str(record.seq.upper())
+        tree.add(motif)
+        ref_motif2name[motif] = motif_name
 
-    with open(args.motif, 'r') as motifDB:
-        for line in motifDB:
-            tree.add(line.strip())  # add motif
     if is_test:
         end_time = time.time()
-        print(f"read data: {end_time - start_time} s")
+        print(f"read data and construct BK tree: {end_time - start_time} s")
 
 
     annotation_list = []
-    for record in records:
+    for record in seq_records:
         seq_name = record.name
         print(f'Start Processing [{seq_name}]')
 
@@ -174,18 +179,14 @@ if __name__ == "__main__":
         total_task = max(1, (seqLenwN - window_size) // step_size + 1)
         
         tasks = [(cur + 1, total_task, seq[cur * step_size : (cur + 1) * step_size]) for cur in range(total_task)]
-        t = time.time() 
+
         with Pool(processes = args.thread) as pool:
             results = pool.map(find_N, tasks)
             #pool.close()    # close the pool and don't receive any new tasks
             #pool.join()     # wait for all the tasks to complete
-            #results = list(results)
-        tt = time.time()
-        print(f"slice: {tt - t} s")
+
         N_coordinate = pd.concat(results, ignore_index=True)
         N_coordinate = N_coordinate.sort_values(by=['start']).reset_index(drop=True)
-
-        ### print(N_coordinate)
 
         if N_coordinate.shape[0] > 0:
             N_coordinate_new = pd.DataFrame(columns=['start', 'end'])
@@ -211,11 +212,10 @@ if __name__ == "__main__":
                 l += N_coordinate_new.loc[i,'end'] - N_coordinate_new.loc[i,'start']
                 N_coordinate_new.loc[i,'new_index'] -= l
 
-            ### print(N_coordinate_new)  #############################
         
         if is_test:
             end_time = time.time()
-            print(f"calculate index transformation: {end_time - start_time} s")
+            print(f"calculate coordinate transformation: {end_time - start_time} s")
 
         ##################################
         # split into windows to decompose
@@ -246,12 +246,13 @@ if __name__ == "__main__":
         ##################################
         # merge and decide the representive of motifs
         ##################################
-        motifs, motifs_rep, nondup, nondup_rep = [], [], [], []
+        motifs, motifs_rep, ref_motifs,  nondup, nondup_rep, nondup_ref = [], [], [], [], [], []
         for pid, _, result in results:
             tmp = result.motifs['motif'].to_list()
             tmp_length = min(args.motifnum, len(tmp))
             motifs.extend(tmp[: tmp_length])
             motifs_rep.extend(result.motifs['value'].to_list()[: tmp_length])
+            ref_motifs.extend(result.motifs['ref_motif'].to_list()[: tmp_length])
         for idx in range(len(motifs)):
             is_dup = False
             for idx2, motif in enumerate(nondup):
@@ -262,19 +263,26 @@ if __name__ == "__main__":
             if not is_dup:
                 nondup.append(motifs[idx])
                 nondup_rep.append(motifs_rep[idx])
+                nondup_ref.append(ref_motifs[idx])
             else:
                 nondup_rep[same_idx] += motifs_rep[idx]
-                ### print(f'{nondup[same_idx]} : {motifs_rep[same_idx]}')
 
         print(f'Number of identified motif = {len(nondup)}')
 
-        tmp = pd.DataFrame(columns=['motif','motif_rep'])
+        tmp = pd.DataFrame(columns=['motif','motif_rep', 'label'])
         tmp['motif'] = nondup
         tmp['motif_rep'] = nondup_rep
+        tmp['label'] = nondup_ref
         tmp = tmp.sort_values(by=['motif_rep'], ascending = False).reset_index(drop=True)
-        tmp.to_csv(f'{args.output}_motif.txt', sep='\t')
+        tmp.to_csv(f'{args.output}.allmotif.txt', sep='\t')
         tmp = tmp.head(args.motifnum)
         nondup = tmp['motif'].to_list()
+        nondup_ref = tmp['label'].to_list()
+
+        motif2ref_motif = dict()
+        for i in range(len(nondup)):
+            motif2ref_motif[nondup[i]] = nondup_ref[i]
+            ### print(f'{nondup[i]} : {nondup_ref[i]}')
 
         for pid, _, result in results:
             result.motifs_list = nondup
@@ -336,7 +344,6 @@ if __name__ == "__main__":
                 anno_end = df['end'].values
                 anno_motif = df['motif'].values
                 anno_distance = df['distance'].values
-                ### print(f'{i} read pid: {pid}')
 
             # Skip one base
             if dp[i-1] - gap_penalty > 0:
@@ -439,8 +446,6 @@ if __name__ == "__main__":
         annotation = pd.DataFrame(annotation_data, columns=['seq','length','start','end','motif','rep_num','score','CIGAR'])
         annotation = annotation.reset_index(drop=True)
         
-        ### print(annotation)
-        
         # coordinates transformation with N character
         if N_coordinate.shape[0]:
             for i in range(annotation.shape[0]):
@@ -457,8 +462,6 @@ if __name__ == "__main__":
                         length = int(cot)
                         tmp = N_coordinate_new[(N_coordinate_new['new_index'] > cur) & (N_coordinate_new['new_index'] <= cur + length)]
                         if tmp.shape[0]:    # if there is N character in this region
-                            ### print(f'###{cur} ~ {cur+length}')
-                            ### print(tmp)
                             
                             for row in tmp.itertuples():
                                 length -= row.new_index - cur
@@ -494,7 +497,6 @@ if __name__ == "__main__":
                     tmp = tmp.reset_index(drop=True)
                     l = tmp.shape[0] - 1
                     annotation.loc[i,'end'] += tmp.loc[l,'old_index'] - tmp.loc[l,'new_index'] 
-        ### print(annotation)
         annotation_list.append(annotation)
         
     merged_annotation = pd.concat(annotation_list, ignore_index=True)
@@ -513,12 +515,11 @@ if __name__ == "__main__":
     # make file - *.annotation.tsv
     ##################################
     detail_annotation = []
-    for record in records:
+    for record in seq_records:
         seq_name = record.name
         sequence = str(record.seq)
         seqLen = len(sequence)
         tmp = merged_annotation[merged_annotation['seq'] == seq_name]
-        ### print(tmp)
         
         for index, row in tmp.iterrows():
             idx = row.start
@@ -543,7 +544,7 @@ if __name__ == "__main__":
                     length += int(num)
                     sub_cigar += f'{num}N'
                     num = ''
-                else:   # symbol == number
+                else:
                     num += symbol
                 j += 1
             ### detail_annotation.append([seq_name, seqLen, start, start + length, row.motif, actual_motif, sub_cigar])
@@ -569,10 +570,19 @@ if __name__ == "__main__":
     motif_df = motif_df.sort_values(by=['rep_num'], ascending = False).reset_index(drop=True)
     motif_df.index.name = 'id'
     motifs_list = motif_df['motif'].to_list()
+
+    tmp = []
+    for motif in motifs_list:
+        if motif2ref_motif[motif] != None:
+            tmp.append(ref_motif2name[motif2ref_motif[motif]])
+        else:
+            tmp.append(None)
+    label_col = {'label' : tmp}
+    label_col_df = pd.DataFrame(label_col)
+    motif_df = pd.concat([motif_df, label_col_df], axis=1)
     motif_df.to_csv(f'{args.output}.motif.tsv', sep = '\t', index = True)
-    ### print([row for row in motif_df.iterrows()])
+
     motif2id = {row['motif'] : index for index, row in motif_df.iterrows()}
-    ### print(motif2id)
     
     if is_test:
         end_time = time.time()
@@ -591,9 +601,10 @@ if __name__ == "__main__":
         all_df_row.extend(calculate_distance(motif, motifs_list, motif2id))
 
     distance_df = pd.DataFrame(all_df_row, columns = ['ref','query','dist','is_rc'])
+    distance_df['sum'] = distance_df['ref'] + distance_df['query']
     distance_df = distance_df[distance_df['ref'] != distance_df['query']]
-    distance_df = distance_df.sort_values(by=['dist']).reset_index(drop=True)
-    distance_df.to_csv(f'{args.output}.dist.tsv', sep = '\t', index = False)
+    distance_df = distance_df.sort_values(by=['dist','sum','ref','query']).reset_index(drop=True)
+    distance_df.to_csv(f'{args.output}.dist.tsv', sep = '\t', index = False, columns = ['ref','query','dist','is_rc'])
 
     if is_test:
         end_time = time.time()

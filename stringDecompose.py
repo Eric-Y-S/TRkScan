@@ -105,13 +105,13 @@ def find_similar_match(seq:str, motifs:list, max_distances:list):
     return motif_match_df
 
 class Decompose:
-    def __init__(self, sequence, ksize, tree):
+    def __init__(self, sequence, ksize, tree, abud_threshold = 0.01, abud_min = 3, dist_ratio = 0.4):
         self.sequecne = sequence
         self.ksize = ksize
         self.ref = tree
-        self.abud_treshold = 0.01
-        self.abud_min = 3
-        self.dist_ratio = 0.4
+        self.abud_threshold = abud_threshold
+        self.abud_min = abud_min
+        self.dist_ratio = dist_ratio
         self.kmer = None
         self.dbg = None
         self.motifs = None
@@ -124,7 +124,7 @@ class Decompose:
             kmers = [kmer for kmer, _ in mh.kmers_and_hashes(self.sequecne, force=True) ]
             kmer_count = Counter(kmers)
             max_count = kmer_count.most_common(1)[0][1]
-            min_count = max(self.abud_min, max_count * self.abud_treshold)
+            min_count = max(self.abud_min, max_count * self.abud_threshold)
             filtered_kmer_count = {k: v for k, v in kmer_count.items() if v >= min_count}
             self.kmer = filtered_kmer_count
         return self.kmer
@@ -203,23 +203,23 @@ class Decompose:
 
                 min_distance = 1e6
                 best_motif = motif
-                sequences = rotate_strings(motif)  # 获取所有旋转的变体
-                max_distance = int(0.5 * len(motif))  # 设置最大允许的距离
+                ref_motif = None
+                sequences = rotate_strings(motif)  # get all format
+                max_distance = int(0.5 * len(motif))
                 for seq in sequences:
-                    ### print(f'############## 当前查询: {seq}')
-                    matches = self.ref.find(seq, max_distance)  # 查询匹配的motif
-                    ### print(matches)
+                    matches = self.ref.find(seq, max_distance)  # find matched motif
                     for dist, ref in matches:
-                        ### print(f'匹配: {ref} 距离: {dist}')
                         if dist < min_distance:
                             best_motif = seq
                             min_distance = dist
+                            ref_motif = ref
 
                 cot = [self.dbg[cycle[i]][cycle[i+1]]['weight'] for i in range(len(cycle) - 1)]
                 cot.append(self.dbg[cycle[-1]][cycle[0]]['weight'])  # add the weight of the last edge
 
-                motifs.append([cycle, best_motif, min(cot)])
-            motifs_df = pd.DataFrame(motifs, columns=['cycle', 'motif', 'value'])
+                # print(f'{min_distance}\t{best_motif}\t{ref_motif}\t{min(cot)}')
+                motifs.append([cycle, best_motif, ref_motif, min(cot)])
+            motifs_df = pd.DataFrame(motifs, columns=['cycle', 'motif', 'ref_motif', 'value'])
             motifs_df = motifs_df.sort_values(by=['value'], ascending = False).reset_index(drop=True)
             self.motifs = motifs_df
             self.motifs_list = motifs_df['motif'].to_list()

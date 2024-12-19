@@ -11,6 +11,7 @@ library(visNetwork)
 setwd("D:/MyFile/git_repo/TRkScan/")
 source("./plotScripts/triangular_heatmap.R")
 
+options(shiny.maxRequestSize=30*1024^2)
 
 ui <- fluidPage(
   
@@ -105,8 +106,8 @@ ui <- fluidPage(
       checkboxInput("merge_rc", "merge_rc", FALSE)
     ),
     column(8,
-      visNetworkOutput("network"),
-      plotOutput("legend")
+      visNetworkOutput("network") # ,
+      # plotOutput("legend")
     )
   ),
   
