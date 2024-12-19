@@ -256,6 +256,8 @@ if __name__ == "__main__":
         for idx in range(len(motifs)):
             is_dup = False
             for idx2, motif in enumerate(nondup):
+                if len(motifs[idx]) == 1: # filter out 1 bp motif
+                    continue
                 if rolling_same(motifs[idx], motif):
                     is_dup = True
                     same_idx= idx2
