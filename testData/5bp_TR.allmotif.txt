@@ -1,0 +1,3 @@
+	motif	motif_rep	label
+0	ATTGG	19	ATTGG
+1	AATCC	6	AATCC

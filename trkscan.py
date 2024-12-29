@@ -8,8 +8,6 @@ from stringDecompose import Decompose
 import numpy as np
 import Levenshtein
 from Bio import SeqIO   # I/O processing
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
 from multiprocessing import Pool    # multi-thread
 import time
 
@@ -53,6 +51,9 @@ def decompose_sequence(task):
 def single_motif_annotation(task):
     pid, total_task, seg = task
     seg.annotate_with_motif()
+    # polish 5' end annotation
+    if pid == 1:
+        seg.annotate_polish_head()
     df = seg.annotation
     df[['start', 'end']] += (pid - 1) * step_size
     df = df.sort_values(by='end').reset_index(drop=True)
@@ -165,6 +166,7 @@ if __name__ == "__main__":
 
 
     annotation_list = []
+    motif2ref_motif = dict()
     for record in seq_records:
         seq_name = record.name
         print(f'Start Processing [{seq_name}]')
@@ -256,8 +258,8 @@ if __name__ == "__main__":
         for idx in range(len(motifs)):
             is_dup = False
             for idx2, motif in enumerate(nondup):
-                if len(motifs[idx]) == 1: # filter out 1 bp motif
-                    continue
+                #if len(motifs[idx]) == 1: # filter out 1 bp motif
+                #    continue
                 if rolling_same(motifs[idx], motif):
                     is_dup = True
                     same_idx= idx2
@@ -281,7 +283,7 @@ if __name__ == "__main__":
         nondup = tmp['motif'].to_list()
         nondup_ref = tmp['label'].to_list()
 
-        motif2ref_motif = dict()
+        
         for i in range(len(nondup)):
             motif2ref_motif[nondup[i]] = nondup_ref[i]
             ### print(f'{nondup[i]} : {nondup_ref[i]}')
@@ -318,8 +320,10 @@ if __name__ == "__main__":
         # DP to link
         ##################################
         # parameters
+        match_score = 1
+        mapped_len_dif_penalty = 0.01 # hope mapped sequence as long as the motif
         gap_penalty = 1
-        distance_penalty = 1
+        distance_penalty = 1.5
         perfect_bonus = 0.5
 
         length = len(filter_seq)
@@ -362,8 +366,8 @@ if __name__ == "__main__":
                 motif = anno_motif[idx]
                 distance = anno_distance[idx]
                 bonus = perfect_bonus * len(motif) if distance == 0 else 0
-
-                score = dp[pre_i] + len(motif) - distance * distance_penalty + bonus
+                print(abs(len(motif) - (idx - pre_i)))
+                score = dp[pre_i] + len(motif) * match_score - abs(len(motif) - (idx - pre_i)) * mapped_len_dif_penalty - distance * distance_penalty + bonus
                 if score >= dp[i]:
                     dp[i] = score
                     pre[i] = (pre_i, idx, motif)
@@ -414,6 +418,7 @@ if __name__ == "__main__":
                 cur_motif, rep_num, score, max_score, cigar_string = None, 0, 0, 0, ''
                 skip_num = 0
                 while next_coords[idx2] != None:
+                    print(idx2)
                     motif = next_motif[idx2]
                     if motif is not None:    # match a motif 
                         if cur_motif != motif:       # split the annotation and init
@@ -428,7 +433,10 @@ if __name__ == "__main__":
                             skip_num = 0
 
                         rep_num += 1
+                        ### print(motif, filter_seq[idx2: next_coords[idx2]])
                         distance, cigar = get_distacne_and_cigar(motif, filter_seq[idx2: next_coords[idx2]])
+                        if idx2 == 0:
+                            distance -= len(motif) - len(filter_seq[idx2: next_coords[idx2]])
                         score += len(cur_motif) - distance * distance_penalty
                         cigar_string += cigar + '/'
                         if score >= max_score:
@@ -572,7 +580,6 @@ if __name__ == "__main__":
     motif_df = motif_df.sort_values(by=['rep_num'], ascending = False).reset_index(drop=True)
     motif_df.index.name = 'id'
     motifs_list = motif_df['motif'].to_list()
-
     tmp = []
     for motif in motifs_list:
         if motif2ref_motif[motif] != None:

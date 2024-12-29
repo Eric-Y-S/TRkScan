@@ -1,2 +1,4 @@
-motif	rep_num	ATTGG
-ATTGG	55	0,3
+	motif	rep_num	label
+0	ATTGG	54	xxx
+1	AATCC	9	xxx
+2	ATTCG	3	xxx

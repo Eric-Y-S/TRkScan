@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     #hsat3 = TR_singleMotif('CCATT', 7863, 0.1, seed)
 
-    hsat2_hsat3 = TR_multiMotif(['AATGG','CCATT'], 5000, 0.1, seed)
+    hsat2_hsat3 = TR_multiMotif(['AATGG','CCATT'], 5000, 0.8, seed)
     print(hsat2_hsat3.sequence)
     print(hsat2_hsat3.annotation)
     #print(hsat2_hsat3.annotation)

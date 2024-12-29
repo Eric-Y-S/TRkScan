@@ -7,6 +7,7 @@ library(promises)
 library(ggplot2)
 library(igraph)
 library(visNetwork)
+library(htmlwidgets)
 
 setwd("D:/MyFile/git_repo/TRkScan/")
 source("./plotScripts/triangular_heatmap.R")
@@ -103,11 +104,12 @@ ui <- fluidPage(
   fluidRow(     # motif count and cluster
     column(4, 
       uiOutput("num_of_motif_ui"),
-      checkboxInput("merge_rc", "merge_rc", FALSE)
+      checkboxInput("merge_rc", "merge_rc", FALSE),
+      downloadButton("dl_cluster_df", "save cluster result")
     ),
     column(8,
-      visNetworkOutput("network") # ,
-      # plotOutput("legend")
+      visNetworkOutput("network"),
+      downloadButton("dl_network", "save")
     )
   ),
   
@@ -127,7 +129,8 @@ ui <- fluidPage(
        checkboxInput("align", "align", FALSE)
     ),
     column(8, 
-       plotOutput("motif_vis")
+       plotOutput("motif_vis"),
+       downloadButton("dl_anno", "save")
     )
   ),
   
@@ -236,6 +239,15 @@ server <- function(input, output, session) {
                 step = 1)
   })
   
+  output$dl_cluster_df <- downloadHandler(
+    filename = function() {
+      paste("dataframe-", Sys.Date(), ".tsv", sep = "")
+    },
+    content = function(file) {
+      write.table(nodes(), file, sep = '\t', row.names = FALSE)
+    }
+  )
+  
   graph_data <- reactive({
     req(motif())
     req(dist())
@@ -305,7 +317,8 @@ server <- function(input, output, session) {
 
     # 生成排序后的节点信息
     data.frame(id = motif()$id,
-               label = motif()$motif,
+               label = motif()$label,
+               motif = motif()$motif,
                value = motif()$rep_num,
                color = color_list[code_color_id])
 
@@ -316,11 +329,30 @@ server <- function(input, output, session) {
     graph_data()$edges
   })
 
-  output$network <- renderVisNetwork({
+  networkPlot <- reactive({
     req(nodes())
     req(edges())
-    visNetwork(nodes(), edges(), directed = FALSE)
+    visNetwork(nodes(), edges(), directed = FALSE) %>%
+      visNodes(font = list(size = 20)) %>%
+      visEdges(font = list(size = 15)) %>%
+      visOptions(highlightNearest = TRUE)
   })
+  
+  output$network <- renderVisNetwork({
+    req(networkPlot())
+    networkPlot()
+  })
+  
+  output$dl_network <- downloadHandler(
+    filename = function() {
+      paste("network-", Sys.Date(),".html", sep = "")
+    },
+    content = function(file) {
+      saveWidget(networkPlot(),
+                 file,
+                 selfcontained = TRUE)  # 保存为自包含的 HTML 文件
+    }
+  )
   
   ###################################################
   # MODULE 2: motif annotation
@@ -405,9 +437,6 @@ server <- function(input, output, session) {
       # print(typeof(cigar))
       # print(grepl("N", cigar))
       if (grepl("N", cigar)) {
-        # print(typeof(start))
-        # print(typeof(end))
-        # print(typeof(cigar))
         split_result <- split_cigar(seq, length, start, end, motif, cigar)
         # print(split_result)
         new_df <- rbind(new_df, split_result)
@@ -416,7 +445,7 @@ server <- function(input, output, session) {
       }
     }
     
-    colormap = setNames(nodes()$color, nodes()$label)
+    colormap = setNames(nodes()$color, nodes()$motif)
     new_df$color = colormap[new_df$motif]
     
     # conbine same line
@@ -460,19 +489,15 @@ server <- function(input, output, session) {
     new_df
   })
   
-  output$motif_vis <- renderPlot({
+  annoPlot <- reactive({
     seq(base_pair_concise_annotation())
     
     seq_list = unique(base_pair_concise_annotation()$seq)
     seq_pos = unique(base_pair_concise_annotation()$y_max) + 0.1
     color_list = unique(base_pair_concise_annotation()$color)
-
+    
     if(input$"x-axis" == 'base-pair'){
       data4plot = base_pair_concise_annotation()
-      # print(names(colormap))
-      # print(unique(data4plot$motif) %in% names(colormap) ) 
-      # print(colormap[unique(data4plot$motif)]) 
-      # print(tail(data4plot))
       ggplot() +
         #geom_rect(data = data4plot, aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max, fill = color)) +  
         geom_tile(data = data4plot, aes(x = (start + end) / 2, y = seq, width = end - start, height = y_max - y_min, fill = color)) +
@@ -484,17 +509,28 @@ server <- function(input, output, session) {
         xlab('base pair (bp)') +
         ylab('sequences') +
         theme(axis.text.x = element_text(size = 14),
-              axis.text.y = element_text(size = 14, color = 'black', family = "Arial"),
+              axis.text.y = element_text(size = 14, color = 'black'),
               axis.title = element_text(size = 20),
               legend.position = "none")  # 隐藏 y 轴标签
       
     } else {
       
     }
-
-    
+  }) 
+  
+  output$motif_vis <- renderPlot({
+    req(annoPlot())
+    annoPlot()
   })
   
+  output$dl_anno <- downloadHandler(
+    filename = function() {
+      paste("plot-", Sys.Date(), ".pdf", sep = "")
+    },
+    content = function(file) {
+      ggsave(file, plot = annoPlot(), device = "pdf", width = 10, height = 6)
+    }
+  )
   
   ###################################################
   # MODULE 3: xxxxxxxxxxxxxxx

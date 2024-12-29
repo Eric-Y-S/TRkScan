@@ -90,7 +90,7 @@ def find_similar_match(seq:str, motifs:list, max_distances:list):
             max_match_len = max(end + 1 for _, end in matches['locations'])
 
             idx2 = idx
-            while idx2 < len(lcp) and lcp[idx2] >= max_match_len:
+            while idx2 < len(lcp) and lcp[idx2] >= motif_len + max_distance:
                 for start, end in matches['locations']:
                     motif_positions.append(
                         (start + sa[idx2 + 1], end + 1 + sa[idx2 + 1], motif, s[start:end + 1], matches['editDistance'])
@@ -233,9 +233,36 @@ class Decompose:
             motif_match_df = find_similar_match(self.sequecne, motifs, max_distances)
     
             self.annotation = motif_match_df
-        
         return self.annotation       
 
+    def annotate_polish_head(self):
+        tmp = []
+        max_distance = { motif : int( len(motif) * self.dist_ratio ) for motif in self.motifs_list }
+        for motif in self.motifs_list:
+            motif_r = motif[::-1]
+            seq = self.sequecne[0:len(motif)][::-1]
+
+            for idx in range(len(seq)):
+                # print(motif_r, seq[idx:])
+                matches = edlib.align(motif_r[0: len(motif) - idx], seq[idx:], mode="SHW", task="locations", k = max_distance[motif])
+
+                if matches['editDistance'] == -1:   # not match
+                    continue
+
+                for start, end in matches['locations']:
+                    #print(
+                    #    (0, len(seq) - idx, motif, seq[::-1], matches['editDistance'])
+                    #)
+                    tmp.append(
+                        (0, len(seq) - idx, motif, seq[idx:][::-1], matches['editDistance'])
+                    )
+
+        tmp = pd.DataFrame(tmp, columns= ['start', 'end', 'motif', 'seq', 'distance'])
+        
+        tmp = pd.concat([tmp, self.annotation], ignore_index=True)
+        tmp = tmp.sort_values(by=['end']).reset_index(drop=True)
+        self.annotation = tmp
+        return self.annotation  
 
 if __name__ == "__main__":
     ##############################

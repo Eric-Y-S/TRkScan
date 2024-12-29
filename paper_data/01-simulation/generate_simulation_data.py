@@ -1,0 +1,7 @@
+import TRgenerator
+
+# 
+
+motifSet = []
+
+TRgenerator
