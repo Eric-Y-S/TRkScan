@@ -71,8 +71,8 @@ def merge_motifs(task):
     m1, m2 = task
     m1 = m1.dropna()
     m2 = m2.dropna()
-    ### print(m1.loc[:2, ['motif','ref_motif','value']])
-    ### print(m2.loc[:2, ['motif','ref_motif','value']])
+    print(m1.loc[:, ['motif','ref_motif','value']])
+    print(m2.loc[:, ['motif','ref_motif','value']])
     for idx in range(m2.shape[0]):
         is_dup = False
         motif = m2.loc[idx, 'motif']
