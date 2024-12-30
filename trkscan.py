@@ -286,7 +286,8 @@ if __name__ == "__main__":
         while len(motif_df_list) > 1:
             num = len(motif_df_list)
             tasks = [(motif_df_list[i*2], motif_df_list[i*2+1]) for i in range(num // 2)]
-            print(tasks)
+            if num % 2 == 1:
+                remaining = motif_df_list[num-1]
             with Pool(processes = args.thread) as pool:
                 motif_df_list = pool.imap_unordered(merge_motifs, tasks)
                 pool.close()    # close the pool and don't receive any new tasks
@@ -294,7 +295,6 @@ if __name__ == "__main__":
                 motif_df_list = list(motif_df_list)
                 print(motif_df_list)
             if num % 2 == 1:
-                remaining = motif_df_list[num-1]
                 motif_df_list.append(remaining)
 
         motifs_df = motif_df_list[0]  # ['cycle', 'motif', 'ref_motif', 'value']
