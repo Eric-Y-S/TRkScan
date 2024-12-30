@@ -75,6 +75,7 @@ def merge_motifs(task):
         is_dup = False
         motif = m2.loc[idx, 'motif']
         for idx2 in range(m1.shape[0]):
+            print(m1.loc[idx2, 'motif'])
             if rolling_same(m1.loc[idx2, 'motif'], motif):
                 is_dup = True
                 same_idx = idx2
