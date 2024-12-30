@@ -1,5 +1,6 @@
 library(shiny)
 library(stringr)
+library(tidyr)
 library(dplyr)
 library(future)
 library(promises)
@@ -284,6 +285,7 @@ server <- function(input, output, session) {
       }
     }
 
+    print('graph done!')
 
     # return data
     list(graph = g, edges = tmp_edges, distance_df = distance_df)
@@ -308,24 +310,54 @@ server <- function(input, output, session) {
     tmp = tmp[order(tmp$total_rep_num, decreasing = TRUE),]
     tmp$new_cluster_id = 1:nrow(tmp)
 
+    print(tmp)
+    
     old_cluster_id <- data.frame(old_cluster_id  = comp$membership)
     code_color_id <- old_cluster_id %>%
       left_join(tmp, by = "old_cluster_id") %>%
       mutate(color_id = ifelse(new_cluster_id < length(color_list), new_cluster_id, length(color_list))) %>%
       pull(color_id)
-    ### print(code_color_id)
+    
+    print(code_color_id)
+    # decide direction
+    dir_list = c('+')
+    dist = dist()
+    motif_list = motif()$id
 
-    # 生成排序后的节点信息
+    if (length(motif_list) > 1){
+      for (i in 2:length(motif_list)){
+        dir = ''
+        for (j in 1:(i-1)) {
+          if (code_color_id[i] != code_color_id[j]){
+            next
+          }
+          ### print(dist[dist$ref == motif_list[i] & dist$query == motif_list[j], ])
+          if (dist[dist$ref == motif_list[i] & dist$query == motif_list[j],][1, 'is_rc']){
+            dir = ifelse(dir_list[j] == '+', '-', '+')
+            break
+          } else {
+            dir = ifelse(dir_list[j] == '+', '+', '-')
+            break
+          }
+        }
+      }
+      dir_list = c(dir_list, c(ifelse(dir != '', dir, '+')))
+
+    }
+    
+    print('nodes done!')
+    
     data.frame(id = motif()$id,
                label = motif()$label,
                motif = motif()$motif,
                value = motif()$rep_num,
-               color = color_list[code_color_id])
-
+               color = color_list[code_color_id],
+               dir = dir_list)
   })
 
   edges <- reactive({
-    req(graph_data())  # 使用共享的 graph_data
+    req(graph_data())  # use shared graph_data
+    print('edges done!')
     graph_data()$edges
   })
 
@@ -369,138 +401,181 @@ server <- function(input, output, session) {
                 step = 1)
   })
   
-  split_cigar <- function(seq, length, start, end, motif, cigar) {
-    segment_data <- data.frame()
+  
+ # solve split motif
+  split_cigar <- function(row, name) {
+    result <- data.frame()  # seq, bp_x, height, motif_id, name
     
-    new_start = start
-    cur = new_start
-    cigar_str = ''
+    seq = row[1, 'seq']
+    start = row[1, 'start']
+    cigar = row[1, 'CIGAR']
+    motif_id = motif2id()[row[1, 'motif']]
+    cur = start
+    length = 0
+    sub_name = 1
+    
+    result <- rbind(result, data.frame(
+      seq = seq,
+      bp_x = cur,
+      height = length,
+      motif_id = motif_id,
+      name = paste(name, as.character(sub_name), sep = '-')
+    ))
+    
+
     num_str = ''
-    # print(length(cigar))
     for (i in 1:nchar(cigar)){
       symbol = substring(cigar, i, i)
-      # print(symbol)
       if (symbol %in% c('=','X','I') ){
-        ### print("#############33")
         cur = cur + as.integer(num_str)
-        cigar_str =  paste0(cigar_str, num_str, symbol)
+        length = length + as.integer(num_str)
         num_str = ''
       } else if (symbol == 'D'){
-        cigar_str =  paste0(cigar_str, num_str, symbol)
         num_str = ''
       } else if (symbol == 'N'){
-        segment_data <- rbind(segment_data, data.frame(
+        result <- rbind(result, data.frame(
           seq = seq,
-          length = length,
-          start = new_start,
-          end = cur,
-          motif = motif,  
-          CIGAR = cigar_str
+          bp_x = cur,
+          height = length,
+          motif_id = motif_id,
+          name = paste(name, as.character(sub_name), sep = '-')
         ))
-        new_start = cur + as.integer(num_str)
-        cur = new_start
-        cigar_str = ''
+        sub_name = sub_name + 1
+        cur = cur + as.integer(num_str)
         num_str = ''
-      } else if (symbol == '/'){
-        cigar_str = paste0(cigar_str, '/')
-      } else {
+        if (i != nchar(cigar)){
+          result <- rbind(result, data.frame(
+            seq = seq,
+            bp_x = cur,
+            height = length,
+            motif_id = motif_id,
+            name = paste(name, as.character(sub_name), sep = '-')
+          ))
+        }
+
+      } else {  # 0-9
         num_str = paste0(num_str, symbol)
       }
     }
-    if (length(cigar_str) > 0){
-      segment_data <- rbind(segment_data, data.frame(
+    if (symbol != 'N'){
+      result <- rbind(result, data.frame(
         seq = seq,
-        length = length,
-        start = new_start,
-        end = cur,
-        motif = motif,  
-        CIGAR = cigar_str
+        bp_x = cur,
+        height = length,
+        motif_id = motif_id,
+        name = paste(name, as.character(sub_name), sep = '-')
       ))
     }
-    return(segment_data)
+
+    result$height = (length - result$height) / length
+
+    return(result)
   }
   
-  base_pair_concise_annotation <- reactive({
-    seq(concise())
-    seq(nodes())
-    
-    df = concise()
-    # split with N character
-    new_df <- data.frame()
-    for (i in 1:nrow(df)) {
-      seq <- df$seq[i]
-      length <- df$length[i]
-      start <- df$start[i]
-      end <- df$end[i]
-      motif <- df$motif[i]
-      cigar <- df$CIGAR[i]
-      # print(typeof(cigar))
-      # print(grepl("N", cigar))
-      if (grepl("N", cigar)) {
-        split_result <- split_cigar(seq, length, start, end, motif, cigar)
-        # print(split_result)
-        new_df <- rbind(new_df, split_result)
-      } else {
-        new_df <- rbind(new_df, df[i, c('seq','length','start','end','motif','CIGAR')])
-      }
+  # get primary data4plot
+  annoData4plot <- reactive({
+    seq(annotation())
+    df = annotation()
+
+    df_noedit = df[! grepl('N', df$CIGAR), c('seq', 'start', 'end', 'motif')]
+
+    new_df = data.frame(
+      seq = rep(df_noedit$seq, 2),
+      bp_x = c(df_noedit$start, df_noedit$end),
+      height = c(rep(1, nrow(df_noedit)), rep(0, nrow(df_noedit))),
+      motif_id = motif2id()[rep(df_noedit$motif, 2)],
+      name = rep(as.character(1:nrow(df_noedit)), 2)
+    )
+
+    cur_name = nrow(new_df) + 1
+    # make primary data for annotation plot
+    df_edit = df[grepl('N', df$CIGAR), ]
+    row.names(df_edit) = 1:nrow(df_edit)
+    for (i in 1:nrow(df_edit)) {
+      tmp = split_cigar(df_edit[i, ], cur_name)
+      new_df = rbind(new_df, tmp)
+      cur_name = cur_name + 1
     }
-    
-    colormap = setNames(nodes()$color, nodes()$motif)
-    new_df$color = colormap[new_df$motif]
-    
-    # conbine same line
-    df = new_df
-    new_df = data.frame()
-    ### print(df)
-    for (i in 1:(nrow(df)-1)){
-      if (i == 1){
-        start = df[1,'start']
-        end = df[1,'end']
-      }
-      if (df[i,'color'] == df[i+1, 'color'] && df[i,'end'] == df[i+1,'start']){
-        end = df[i+1,'end']
-      } else {
-        new_df <- rbind(new_df, data.frame(
-          seq = df[i,'seq'],
-          length = df[i,'seq'],
-          start = start,
-          end = end,
-          color = df[i,'color']
-        ))
-        start = df[i+1,'start']
-        end = df[i+1,'end']
-      }
-    }
-    new_df <- rbind(new_df, data.frame(
-      seq = df[i,'seq'],
-      length = df[i,'seq'],
-      start = start,
-      end = end,
-      color = df[i,'color']
-    ))
-    
-    
-    # give y axis
-    seq_list = unique(new_df$seq)
-    seq2ymin = setNames(-1*(1:length(seq_list)),seq_list)
-    new_df$y_min = seq2ymin[new_df$seq]
-    new_df$y_max = new_df$y_min + 0.8
+    rownames(new_df) = 1:nrow(new_df)
     
     new_df
   })
   
-  annoPlot <- reactive({
-    seq(base_pair_concise_annotation())
+  # get final data4plot
+  annoData4plot_final <- reactive({
+    seq(annoData4plot)
+    seq(nodes())
     
-    seq_list = unique(base_pair_concise_annotation()$seq)
-    seq_pos = unique(base_pair_concise_annotation()$y_max) + 0.1
-    color_list = unique(base_pair_concise_annotation()$color)
+    df = annoData4plot()
+    
+    # add color
+    colormap = setNames(nodes()$color, as.character(nodes()$id))
+    df$color = colormap[as.character(df$motif_id)]
+    # add direction
+    print(nodes()$dir)
+    dirmap = setNames(nodes()$dir, as.character(nodes()$id))
+    df$dir = dirmap[as.character(df$motif_id)]
+    # give y axis
+    seq_list = unique(df$seq)
+    seq2y = setNames(-1*(1:length(seq_list)), seq_list)
+
+
+    # make final data based on direction
+    df <- df %>%
+      uncount(2) %>%
+      mutate(height = ifelse(dir == '+', height, 1 - height)) %>%
+      mutate(y = ifelse(row_number() %% 2 == 1, seq2y[seq] - height * 0.8, seq2y[seq] + height * 0.8))
+    
+   
+    # add 
+    # # combine same line
+    # df = new_df
+    # new_df = data.frame()
+    # for (i in 1:(nrow(df)-1)){
+    #   if (i == 1){
+    #     start = df[1,'start']
+    #     end = df[1,'end']
+    #   }
+    #   if (df[i,'color'] == df[i+1, 'color'] && df[i,'end'] == df[i+1,'start']){
+    #     end = df[i+1,'end']
+    #   } else {
+    #     new_df <- rbind(new_df, data.frame(
+    #       seq = df[i,'seq'],
+    #       length = df[i,'seq'],
+    #       start = start,
+    #       end = end,
+    #       color = df[i,'color']
+    #     ))
+    #     start = df[i+1,'start']
+    #     end = df[i+1,'end']
+    #   }
+    # }
+    # new_df <- rbind(new_df, data.frame(
+    #   seq = df[i,'seq'],
+    #   length = df[i,'seq'],
+    #   start = start,
+    #   end = end,
+    #   color = df[i,'color']
+    # ))
+    df <- df[!duplicated(df), ]
+    print('final annotation data4plot done!')
+    print(df)
+    df
+  })
+  
+  annoPlot <- reactive({
+    seq(annoData4plot_final())
+    
+    seq_list = unique(annoData4plot_final()$seq)
+    seq_pos = -1 * (1:length(seq_list))
+    color_list = unique(annoData4plot_final()$color)
     
     if(input$"x-axis" == 'base-pair'){
-      data4plot = base_pair_concise_annotation()
+      data4plot = annoData4plot_final()
       ggplot() +
+        geom_polygon(data = data4plot, aes(x = bp_x, y = y, group = name, fill = color)) +
         #geom_rect(data = data4plot, aes(xmin = start, xmax = end, ymin = y_min, ymax = y_max, fill = color)) +  
-        geom_tile(data = data4plot, aes(x = (start + end) / 2, y = seq, width = end - start, height = y_max - y_min, fill = color)) +
+        #geom_tile(data = data4plot, aes(x = (start + end) / 2, y = seq, width = end - start, height = y_max - y_min, fill = color)) +
         geom_text(aes(label = seq_list), x = rep(-1,length(seq_list)), y = seq_pos, size = 10, hjust = 0) +
         theme_minimal() + 
         ### labs(title = "Tandem Repeat Units", x = "Position", y = "") +
@@ -510,6 +585,8 @@ server <- function(input, output, session) {
         ylab('sequences') +
         theme(axis.text.x = element_text(size = 14),
               axis.text.y = element_text(size = 14, color = 'black'),
+              panel.grid.minor.y = element_blank(),
+              panel.grid.major.y = element_blank(),
               axis.title = element_text(size = 20),
               legend.position = "none")  # 隐藏 y 轴标签
       

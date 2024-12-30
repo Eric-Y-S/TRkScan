@@ -19,7 +19,7 @@ def find_N(task):
     sequence = np.array(list(sequence))
     n_indices = np.where(sequence == 'N')[0]
     if len(n_indices) == 0:
-        if not args.silent:
+        if not args.quiet:
             print(f'Process N Complete: {pid}/{total_task}')
         return pd.DataFrame(columns=['start', 'end'])
     
@@ -33,7 +33,7 @@ def find_N(task):
     
     N_coordinate_df = pd.DataFrame(N_coordinates, columns=['start', 'end'])
     N_coordinate_df[['start', 'end']] += (pid - 1) * window_size
-    if not args.silent:
+    if not args.quiet:
         print(f'Process N Complete: {pid}/{total_task}')
 
     return N_coordinate_df
@@ -44,7 +44,7 @@ def decompose_sequence(task):
     seg.count_kmers()
     seg.build_dbg()
     seg.find_motif()
-    if not args.silent:
+    if not args.quiet:
         print(f'Decomposition Complete: {pid}/{total_task}')
     return ( pid, total_task, seg )
 
@@ -58,7 +58,7 @@ def single_motif_annotation(task):
     df[['start', 'end']] += (pid - 1) * step_size
     df = df.sort_values(by='end').reset_index(drop=True)
     df.to_csv(f'{args.output}_temp/seg_anno_{pid}.csv', index = False)
-    if not args.silent:
+    if not args.quiet:
         print(f'Single Motif Annotation Complete: {pid}/{total_task}')
 
 def rolling_same(seq1, seq2):
@@ -66,6 +66,26 @@ def rolling_same(seq1, seq2):
         return False
     seq1double = seq1 * 2
     return seq2 in seq1double
+
+def merge_motifs(task):
+    m1, m2 = task
+    for idx in range(m2.shape[0]):
+        is_dup = False
+        motif = m2.loc[idx, 'motif']
+        for idx2 in range(m1.shape[0]):
+            if rolling_same(m1.loc[idx2, 'motif'], motif):
+                is_dup = True
+                same_idx= idx2
+                break
+        if not is_dup:
+            m1 = pd.concat(m1, m2.loc[idx, ], ignore_index=True)
+        else:
+            m1.loc[same_idx, 'value'] += m2.loc[idx, 'value']
+
+    m1 = m1.sort_values(by='value', ascending=False).reset_index(drop=True)
+    m1 = m1.loc[: args.motifnum,]
+
+    return m1
 
 def get_distacne_and_cigar(ref, query):
     matches = edlib.align(query, ref, mode = "NW", task = "path")
@@ -111,23 +131,34 @@ def rotate_strings(s):
 ##################################
 script_path = os.path.realpath(__file__)
 script_directory = os.path.dirname(script_path).replace('\\','/')
-window_size = 5000
-overlap_size = 1000
-step_size = window_size - overlap_size
-is_test = True
+is_test = True # set True if you want to show the running time of each module
 
-# DEFAULT: python trkscan_test.py testData/testData.fasta testData/testData.annotated.bed
-parser = argparse.ArgumentParser(description='TRkScan')
-parser.add_argument('input', type = str, help = 'FASTA file you want to annotate')
-parser.add_argument('output', type = str, help = 'output prefix')
-parser.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads')
-parser.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph')
-parser.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.fa', help='reference motif set')  ###### need to add reference set
-parser.add_argument('-n', '--motifnum', type = int, default = 30, help='motif maximum')
-parser.add_argument('-f', '--force', action='store_true', help="annotate with motif X in given motif set no matter whether motif X is in the sequence")
-parser.add_argument('-s', '--silent', action='store_true', help="dont output the massive thread complete info to terminal if set TRUE")
+parser = argparse.ArgumentParser(
+    description = 'TRkScan v1.0\nUsage: python trkscan.py -k [ksize] [options] [input.fa] [output_prefix]', 
+    formatter_class = argparse.RawTextHelpFormatter
+)
+file_group = parser.add_argument_group('I/O Options')
+file_group.add_argument('input', type = str, help = 'FASTA file you want to annotate')
+file_group.add_argument('output', type = str, help = 'output prefix')
+
+general_group = parser.add_argument_group('General Options')
+general_group.add_argument('--quiet', action='store_true', help="don't output thread completion informing")
+general_group.add_argument('-t', '--thread', type = int, default = 1, help = 'number of threads [1]')
+general_group.add_argument('-w', '--window', type = int, default = 5000, help = 'parallel window size [5000]')
+general_group.add_argument('-o', '--overlap', type = int, default = 1000, help = 'windows overlap size [1000]')
+
+solve_group = parser.add_argument_group('Solve Options')
+solve_group.add_argument('-k', '--ksize', type = int, default = 5, help = 'k-mer size for building De Bruijn graph [5]')
+solve_group.add_argument('-m', '--motif', type = str, default = f'{script_directory}/data/refMotif.fa', help='reference motif set path')
+solve_group.add_argument('-n', '--motifnum', type = int, default = 30, help='maximum number of motifs [30]')
+solve_group.add_argument('-f', '--force', action='store_true', help='add reference motifs into annotation')
+solve_group.add_argument('-s', '--score', type = float, default = 5, help='minimum output score [5]')
+
 args = parser.parse_args()
 
+window_size = args.window
+overlap_size = args.overlap
+step_size = window_size - overlap_size
 args.input = args.input.replace('\\','/')
 args.output = args.output.replace('\\','/')
 os.makedirs(f'{args.output}_temp', exist_ok=True)
@@ -162,7 +193,7 @@ if __name__ == "__main__":
 
     if is_test:
         end_time = time.time()
-        print(f"read data and construct BK tree: {end_time - start_time} s")
+        print(f"read data and construct BK tree: {round(end_time - start_time, 2)} s")
 
 
     annotation_list = []
@@ -217,7 +248,7 @@ if __name__ == "__main__":
         
         if is_test:
             end_time = time.time()
-            print(f"calculate coordinate transformation: {end_time - start_time} s")
+            print(f"calculate coordinate transformation: {round(end_time - start_time, 2)} s")
 
         ##################################
         # split into windows to decompose
@@ -248,7 +279,23 @@ if __name__ == "__main__":
         ##################################
         # merge and decide the representive of motifs
         ##################################
-        motifs, motifs_rep, ref_motifs,  nondup, nondup_rep, nondup_ref = [], [], [], [], [], []
+        motif_df_list = [result.motifs for pid, _, result in results]
+        
+        while len(motif_df_list) > 1:
+            num = len(motif_df_list)
+            tasks = [(motif_df_list[i*2], motif_df_list[i*2+1]) for i in range(num // 2)]
+            with Pool(processes = args.thread) as pool:
+                motif_df_list = pool.imap_unordered(merge_motifs, tasks)
+                pool.close()    # close the pool and don't receive any new tasks
+                pool.join()     # wait for all the tasks to complete
+                motif_df_list = list(motif_df_list)
+            if num % 2 == 1:
+                remaining = motif_df_list[num-1]
+                motif_df_list.append(remaining)
+
+        motifs_df = motif_df_list[0]  # ['cycle', 'motif', 'ref_motif', 'value']
+        motifs_df = motifs_df.loc[: args.motifnum, ]
+        '''motifs, motifs_rep, ref_motifs,  nondup, nondup_rep, nondup_ref = [], [], [], [], [], []
         for pid, _, result in results:
             tmp = result.motifs['motif'].to_list()
             tmp_length = min(args.motifnum, len(tmp))
@@ -269,31 +316,20 @@ if __name__ == "__main__":
                 nondup_rep.append(motifs_rep[idx])
                 nondup_ref.append(ref_motifs[idx])
             else:
-                nondup_rep[same_idx] += motifs_rep[idx]
+                nondup_rep[same_idx] += motifs_rep[idx]'''
 
-        print(f'Number of identified motif = {len(nondup)}')
-
-        tmp = pd.DataFrame(columns=['motif','motif_rep', 'label'])
-        tmp['motif'] = nondup
-        tmp['motif_rep'] = nondup_rep
-        tmp['label'] = nondup_ref
-        tmp = tmp.sort_values(by=['motif_rep'], ascending = False).reset_index(drop=True)
-        tmp.to_csv(f'{args.output}.allmotif.txt', sep='\t')
-        tmp = tmp.head(args.motifnum)
-        nondup = tmp['motif'].to_list()
-        nondup_ref = tmp['label'].to_list()
-
+        print(f'Number of identified motif = {motifs_df.shape[0]}')
         
-        for i in range(len(nondup)):
-            motif2ref_motif[nondup[i]] = nondup_ref[i]
-            ### print(f'{nondup[i]} : {nondup_ref[i]}')
+        for i in range(motifs_df.shape[0]):
+            motif2ref_motif[motifs_df.loc[i, 'motif']] = motifs_df.loc[i, 'ref_motif']
 
+        nondup = motifs_df['motif'].to_list()
         for pid, _, result in results:
             result.motifs_list = nondup
 
         if is_test:
             end_time = time.time()
-            print(f"get motif: {end_time - start_time} s")
+            print(f"get motif: {round(end_time - start_time, 2)} s")
 
         if is_test:
             start_time = time.time()
@@ -311,7 +347,7 @@ if __name__ == "__main__":
         
         if is_test:
             end_time = time.time()
-            print(f"annotate motif: {end_time - start_time} s")
+            print(f"annotate motif: {round(end_time - start_time, 2)} s")
 
         if is_test:
             start_time = time.time()
@@ -366,7 +402,7 @@ if __name__ == "__main__":
                 motif = anno_motif[idx]
                 distance = anno_distance[idx]
                 bonus = perfect_bonus * len(motif) if distance == 0 else 0
-                print(abs(len(motif) - (idx - pre_i)))
+                ### print(abs(len(motif) - (idx - pre_i)))
                 score = dp[pre_i] + len(motif) * match_score - abs(len(motif) - (idx - pre_i)) * mapped_len_dif_penalty - distance * distance_penalty + bonus
                 if score >= dp[i]:
                     dp[i] = score
@@ -375,7 +411,7 @@ if __name__ == "__main__":
                 idx += 1
 
             # Print progress every 5000 iterations
-            if not args.silent and i % 5000 == 0:
+            if not args.quiet and i % 5000 == 0:
                 print(f'DP: {i // 1000} kbp is Done!')
 
         print('DP complete!')
@@ -402,7 +438,7 @@ if __name__ == "__main__":
 
         if is_test:
             end_time = time.time()
-            print(f"DP and retrace: {end_time - start_time} s")
+            print(f"DP and retrace: {round(end_time - start_time, 2)} s")
 
         if is_test:
             start_time = time.time()
@@ -418,7 +454,7 @@ if __name__ == "__main__":
                 cur_motif, rep_num, score, max_score, cigar_string = None, 0, 0, 0, ''
                 skip_num = 0
                 while next_coords[idx2] != None:
-                    print(idx2)
+                    ### print(idx2)
                     motif = next_motif[idx2]
                     if motif is not None:    # match a motif 
                         if cur_motif != motif:       # split the annotation and init
@@ -510,11 +546,12 @@ if __name__ == "__main__":
         annotation_list.append(annotation)
         
     merged_annotation = pd.concat(annotation_list, ignore_index=True)
+    merged_annotation = merged_annotation[merged_annotation['score'] >= args.score]
     merged_annotation.to_csv(f'{args.output}.concise.tsv', sep = '\t', index = False)
 
     if is_test:
         end_time = time.time()
-        print(f"make concise.tsv: {end_time - start_time} s")
+        print(f"make concise.tsv: {round(end_time - start_time, 2)} s")
 
     print('output concise.tsv is done!')
 
@@ -564,7 +601,7 @@ if __name__ == "__main__":
 
     if is_test:
         end_time = time.time()
-        print(f"make annotation.tsv: {end_time - start_time} s")
+        print(f"make annotation.tsv: {round(end_time - start_time, 2)} s")
 
     print('output annotation.tsv is done!')
 
@@ -595,7 +632,7 @@ if __name__ == "__main__":
     
     if is_test:
         end_time = time.time()
-        print(f"make motif.tsv: {end_time - start_time} s")
+        print(f"make motif.tsv: {round(end_time - start_time, 2)} s")
 
     print('output motif.tsv is done!')
 
@@ -617,7 +654,7 @@ if __name__ == "__main__":
 
     if is_test:
         end_time = time.time()
-        print(f"make dist.tsv: {end_time - start_time} s")
+        print(f"make dist.tsv: {round(end_time - start_time, 2)} s")
 
     print('output dist.tsv is done!')
 
