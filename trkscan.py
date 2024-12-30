@@ -69,8 +69,8 @@ def rolling_same(seq1, seq2):
 
 def merge_motifs(task):
     m1, m2 = task
-    print(m1)
-    print(m2)
+    ### print(m1)
+    ### print(m2)
     for idx in range(m2.shape[0]):
         is_dup = False
         motif = m2.loc[idx, 'motif']
@@ -85,7 +85,7 @@ def merge_motifs(task):
             m1.loc[same_idx, 'value'] += m2.loc[idx, 'value']
 
     m1 = m1.sort_values(by='value', ascending=False).reset_index(drop=True)
-    m1 = m1.loc[: args.motifnum,]
+    m1 = m1.loc[0: args.motifnum, ]
 
     return m1
 
@@ -291,6 +291,7 @@ if __name__ == "__main__":
                 pool.close()    # close the pool and don't receive any new tasks
                 pool.join()     # wait for all the tasks to complete
                 motif_df_list = list(motif_df_list)
+                print(motif_df_list)
             if num % 2 == 1:
                 remaining = motif_df_list[num-1]
                 motif_df_list.append(remaining)
