@@ -281,7 +281,7 @@ if __name__ == "__main__":
         ##################################
         # merge and decide the representive of motifs
         ##################################
-        motif_df_list = [result.motifs for pid, _, result in results]
+        motif_df_list = [result[2].motifs for pid, _, result in results]
         
         while len(motif_df_list) > 1:
             num = len(motif_df_list)
