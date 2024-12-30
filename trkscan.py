@@ -277,7 +277,7 @@ if __name__ == "__main__":
             pool.close()    # close the pool and don't receive any new tasks
             pool.join()     # wait for all the tasks to complete
             results = list(results)
-
+        print(results)
         ##################################
         # merge and decide the representive of motifs
         ##################################
@@ -286,6 +286,7 @@ if __name__ == "__main__":
         while len(motif_df_list) > 1:
             num = len(motif_df_list)
             tasks = [(motif_df_list[i*2], motif_df_list[i*2+1]) for i in range(num // 2)]
+            print(tasks)
             with Pool(processes = args.thread) as pool:
                 motif_df_list = pool.imap_unordered(merge_motifs, tasks)
                 pool.close()    # close the pool and don't receive any new tasks
