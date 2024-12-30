@@ -78,7 +78,7 @@ def merge_motifs(task):
                 same_idx= idx2
                 break
         if not is_dup:
-            m1 = pd.concat(m1, m2.loc[idx, ], ignore_index=True)
+            m1 = pd.concat([m1, m2.loc[idx, ]], ignore_index=True)
         else:
             m1.loc[same_idx, 'value'] += m2.loc[idx, 'value']
 
